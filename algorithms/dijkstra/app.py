@@ -467,7 +467,7 @@ def render_visualization():
         title="Dijkstra's Algorithm Visualization"
     )
     
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 
 def render_results():
@@ -502,7 +502,7 @@ def render_results():
         # Distance table
         st.markdown("**Distance Table:**")
         table_data = create_distance_table(result.distances, labels, result.source)
-        st.dataframe(table_data, use_container_width=True, hide_index=True)
+        st.dataframe(table_data, width='stretch', hide_index=True)
 
 
 def render_matrix_display():
@@ -518,7 +518,7 @@ def render_matrix_display():
         
         col_labels = [labels[i] if labels and i < len(labels) else str(i) for i in range(len(matrix))]
         df = pd.DataFrame(matrix, columns=col_labels, index=col_labels)
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, width='stretch')
 
 
 def main():

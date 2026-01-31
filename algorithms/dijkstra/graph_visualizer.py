@@ -244,14 +244,14 @@ def visualize_graph_plotly(
         is_path_edge = (edge[0], edge[1]) in path_edges or (edge[1], edge[0]) in path_edges
         
         edge_trace = go.Scatter(
-            x=[x0, x1, None],
-            y=[y0, y1, None],
+            x=tuple([x0, x1, None]),
+            y=tuple([y0, y1, None]),
             mode='lines',
             line=dict(
                 width=4 if is_path_edge else 2,
                 color='#FF4500' if is_path_edge else '#708090'
             ),
-            hoverinfo='none'
+            hoverinfo='skip'
         )
         edge_traces.append(edge_trace)
         
@@ -294,19 +294,19 @@ def visualize_graph_plotly(
             node_colors.append('#87CEEB')
     
     node_trace = go.Scatter(
-        x=node_x,
-        y=node_y,
+        x=tuple(node_x),
+        y=tuple(node_y),
         mode='markers+text',
         marker=dict(
             size=40,
-            color=node_colors,
+            color=tuple(node_colors),
             line=dict(width=2, color='#333333')
         ),
-        text=node_text,
+        text=tuple(node_text),
         textposition='middle center',
         textfont=dict(size=14, color='black', family='Arial Black'),
         hoverinfo='text',
-        hovertext=[f"Node: {labels[i] if labels and i < len(labels) else i}" for i in range(n)]
+        hovertext=tuple([f"Node: {labels[i] if labels and i < len(labels) else i}" for i in range(n)])
     )
     
     # Combine all traces
