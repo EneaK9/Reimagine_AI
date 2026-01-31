@@ -48,12 +48,17 @@ async def send_message(request: ChatRequest):
                 is_follow_up = True
                 print(f"Using last generated image for follow-up edit")
         
-        # Add user message to conversation
+        # Add user message to conversation (save actual image data URL if uploaded)
+        user_image_url = None
+        if request.image_base64:
+            # Store the actual base64 data URL so it can be displayed later
+            user_image_url = f"data:image/jpeg;base64,{request.image_base64}"
+        
         conversation_service.add_message(
             conversation.id,
             MessageRole.USER,
             request.message,
-            image_url="[image attached]" if request.image_base64 else ("[editing previous image]" if is_follow_up else None)
+            image_url=user_image_url
         )
         
         # Get conversation context for AI
@@ -85,36 +90,41 @@ async def send_message(request: ChatRequest):
                     style=style,
                 )
                 
-                # Store the last generated image for future follow-ups
-                if generated_images:
-                    # Extract base64 from data URL for storage
-                    last_img = generated_images[0]
-                    if last_img.startswith('data:'):
-                        last_img_base64 = last_img.split(',')[1]
-                    else:
-                        last_img_base64 = last_img
-                    
-                    conversation_service.update_conversation_with_images(
-                        conversation.id,
-                        generated_images,
-                        last_image_base64=last_img_base64
-                    )
-                    
             except Exception as img_error:
                 print(f"Image generation failed: {img_error}")
                 import traceback
                 traceback.print_exc()
         
-        # Add AI response to conversation
+        # Add AI response to conversation FIRST
         conversation_service.add_message(
             conversation.id,
             MessageRole.ASSISTANT,
             ai_response
         )
         
+        # THEN attach images to the assistant message we just added
+        if generated_images:
+            # Extract base64 from data URL for storage
+            last_img = generated_images[0]
+            if last_img.startswith('data:'):
+                last_img_base64 = last_img.split(',')[1]
+            else:
+                last_img_base64 = last_img
+            
+            conversation_service.update_conversation_with_images(
+                conversation.id,
+                generated_images,
+                last_image_base64=last_img_base64
+            )
+        
+        # Clean response - remove [IMAGE_PROMPT] section before sending to client
+        clean_response = ai_response
+        if "[IMAGE_PROMPT]" in clean_response:
+            clean_response = clean_response.split("[IMAGE_PROMPT]")[0].strip()
+        
         return ChatResponse(
             conversation_id=conversation.id,
-            message=ai_response,
+            message=clean_response,
             generated_images=generated_images,
             furniture_suggestions=[]  # TODO: Implement furniture matching
         )

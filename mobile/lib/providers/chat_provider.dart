@@ -146,6 +146,26 @@ class ChatProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Delete a conversation
+  Future<void> deleteConversation(String conversationId) async {
+    try {
+      await _apiService.deleteConversation(conversationId);
+      
+      // Remove from local list
+      _conversations.removeWhere((c) => c.id == conversationId);
+      
+      // If deleted conversation was current, clear it
+      if (_currentConversation?.id == conversationId) {
+        _currentConversation = null;
+      }
+      
+      notifyListeners();
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+    }
+  }
+
   /// Check backend health
   Future<bool> checkHealth() async {
     return await _apiService.healthCheck();

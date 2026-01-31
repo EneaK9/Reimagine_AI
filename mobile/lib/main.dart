@@ -9,13 +9,13 @@ import 'theme/app_theme.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Set system UI overlay style
+  // Set system UI overlay style for light theme
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor: AppTheme.surfaceDark,
-      systemNavigationBarIconBrightness: Brightness.light,
+      statusBarIconBrightness: Brightness.dark, // Dark icons for light background
+      systemNavigationBarColor: AppTheme.surface,
+      systemNavigationBarIconBrightness: Brightness.dark,
     ),
   );
 
@@ -33,10 +33,10 @@ class ReimagineAIApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ChatProvider()),
       ],
       child: MaterialApp(
-        title: 'ReimagineAI',
+        title: 'AI Home Designer',
         debugShowCheckedModeBanner: false,
-        theme: AppTheme.darkTheme,
-        home: const LoginScreen(), // Start with login screen
+        theme: AppTheme.lightTheme, // Use the new light theme
+        home: const LoginScreen(),
       ),
     );
   }

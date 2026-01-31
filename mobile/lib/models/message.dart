@@ -44,6 +44,25 @@ class Message {
   }
 
   factory Message.fromJson(Map<String, dynamic> json) {
+    // Parse image URLs - can come from 'image_urls' array or 'image_url' string
+    List<String> imageUrls = [];
+    
+    if (json['image_urls'] != null) {
+      imageUrls = List<String>.from(json['image_urls']);
+    } else if (json['image_url'] != null && json['image_url'].toString().isNotEmpty) {
+      final urlString = json['image_url'].toString();
+      // Check if it's actual image data (not placeholder text)
+      if (urlString.startsWith('data:') || urlString.startsWith('http') || urlString.startsWith('/')) {
+        // Multiple URLs are stored with ||| separator (commas exist inside base64!)
+        if (urlString.contains('|||')) {
+          imageUrls = urlString.split('|||').where((u) => u.trim().isNotEmpty).toList();
+        } else {
+          // Single image URL
+          imageUrls = [urlString];
+        }
+      }
+    }
+    
     return Message(
       id: json['id'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
       content: json['content'] ?? '',
@@ -51,7 +70,7 @@ class Message {
         (e) => e.name == json['role'],
         orElse: () => MessageRole.assistant,
       ),
-      imageUrls: List<String>.from(json['image_urls'] ?? []),
+      imageUrls: imageUrls,
       timestamp: json['timestamp'] != null 
         ? DateTime.parse(json['timestamp']) 
         : DateTime.now(),

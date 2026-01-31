@@ -38,6 +38,18 @@ dependencies:
   
   # Photo View (for viewing generated images)
   photo_view: ^0.15.0
+  
+  # File handling for 3D models
+  path_provider: ^2.1.0
+  
+  # Device info for capability detection
+  device_info_plus: ^9.0.0
+  
+  # Permission handling
+  permission_handler: ^11.0.0
+  
+  # Unity Integration for AR Room Scanning (add when Unity module is ready)
+  # flutter_unity_widget: ^2022.2.1
 
 dev_dependencies:
   flutter_test:

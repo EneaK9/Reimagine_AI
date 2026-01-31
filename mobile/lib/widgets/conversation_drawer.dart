@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../providers/chat_provider.dart';
 import '../providers/auth_provider.dart';
@@ -7,7 +8,7 @@ import '../screens/login_screen.dart';
 import '../theme/app_theme.dart';
 import 'package:intl/intl.dart';
 
-/// Sidebar drawer showing conversation history
+/// Sidebar drawer showing conversation history - Light theme design
 class ConversationDrawer extends StatefulWidget {
   const ConversationDrawer({super.key});
 
@@ -19,7 +20,6 @@ class _ConversationDrawerState extends State<ConversationDrawer> {
   @override
   void initState() {
     super.initState();
-    // Load conversations when drawer opens
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ChatProvider>().loadConversations();
     });
@@ -28,16 +28,16 @@ class _ConversationDrawerState extends State<ConversationDrawer> {
   @override
   Widget build(BuildContext context) {
     return Drawer(
-      backgroundColor: AppTheme.surfaceDark,
+      backgroundColor: AppTheme.surface,
       child: SafeArea(
         child: Column(
           children: [
             _buildHeader(),
-            const Divider(color: AppTheme.cardDark, height: 1),
+            Divider(color: AppTheme.border, height: 1),
             _buildNewChatButton(),
-            const Divider(color: AppTheme.cardDark, height: 1),
+            Divider(color: AppTheme.border, height: 1),
             Expanded(child: _buildConversationList()),
-            const Divider(color: AppTheme.cardDark, height: 1),
+            Divider(color: AppTheme.border, height: 1),
             _buildFooter(),
           ],
         ),
@@ -51,35 +51,46 @@ class _ConversationDrawerState extends State<ConversationDrawer> {
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(10),
+            width: 48,
+            height: 48,
             decoration: BoxDecoration(
-              gradient: AppTheme.primaryGradient,
-              borderRadius: BorderRadius.circular(12),
+              color: AppTheme.primaryColor,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primaryColor.withOpacity(0.3),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
-            child: const Icon(
-              Icons.auto_awesome,
-              color: Colors.white,
-              size: 24,
+            child: const Center(
+              child: Icon(
+                Icons.home_rounded,
+                color: Colors.white,
+                size: 24,
+              ),
             ),
           ),
-          const SizedBox(width: 12),
-          const Expanded(
+          const SizedBox(width: 14),
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'ReimagineAI',
-                  style: TextStyle(
+                  'AI Home Designer',
+                  style: GoogleFonts.dmSans(
                     color: AppTheme.textPrimary,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
+                const SizedBox(height: 2),
                 Text(
                   'Your design history',
-                  style: TextStyle(
+                  style: GoogleFonts.dmSans(
                     color: AppTheme.textMuted,
-                    fontSize: 12,
+                    fontSize: 13,
                   ),
                 ),
               ],
@@ -92,23 +103,37 @@ class _ConversationDrawerState extends State<ConversationDrawer> {
 
   Widget _buildNewChatButton() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       child: SizedBox(
         width: double.infinity,
-        child: ElevatedButton.icon(
+        child: ElevatedButton(
           onPressed: () {
             context.read<ChatProvider>().startNewConversation();
-            Navigator.pop(context); // Close drawer
+            Navigator.pop(context);
           },
-          icon: const Icon(Icons.add, size: 20),
-          label: const Text('New Design Chat'),
           style: ElevatedButton.styleFrom(
             backgroundColor: AppTheme.primaryColor,
             foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 14),
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(vertical: 16),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(14),
             ),
+            shadowColor: AppTheme.primaryColor.withOpacity(0.3),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.add_rounded, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'New Design',
+                style: GoogleFonts.dmSans(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -119,8 +144,11 @@ class _ConversationDrawerState extends State<ConversationDrawer> {
     return Consumer<ChatProvider>(
       builder: (context, provider, child) {
         if (provider.isLoading) {
-          return const Center(
-            child: CircularProgressIndicator(color: AppTheme.primaryColor),
+          return Center(
+            child: CircularProgressIndicator(
+              color: AppTheme.primaryColor,
+              strokeWidth: 2.5,
+            ),
           );
         }
 
@@ -129,23 +157,32 @@ class _ConversationDrawerState extends State<ConversationDrawer> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(
-                  Icons.chat_bubble_outline,
-                  size: 48,
-                  color: AppTheme.textMuted.withValues(alpha: 0.5),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'No conversations yet',
-                  style: TextStyle(
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: AppTheme.inputBackground,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Icon(
+                    Icons.chat_bubble_outline_rounded,
+                    size: 28,
                     color: AppTheme.textMuted,
-                    fontSize: 16,
                   ),
                 ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Start a new chat to begin',
-                  style: TextStyle(
+                const SizedBox(height: 16),
+                Text(
+                  'No conversations yet',
+                  style: GoogleFonts.dmSans(
+                    color: AppTheme.textSecondary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Start a new design chat',
+                  style: GoogleFonts.dmSans(
                     color: AppTheme.textMuted,
                     fontSize: 14,
                   ),
@@ -169,83 +206,133 @@ class _ConversationDrawerState extends State<ConversationDrawer> {
     );
   }
 
+  void _showDeleteDialog(String convId, String title) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          'Delete Conversation',
+          style: GoogleFonts.dmSans(
+            color: AppTheme.textPrimary,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        content: Text(
+          'Are you sure you want to delete "$title"?',
+          style: GoogleFonts.dmSans(color: AppTheme.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.dmSans(color: AppTheme.textMuted),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              context.read<ChatProvider>().deleteConversation(convId);
+              Navigator.pop(context);
+            },
+            child: Text(
+              'Delete',
+              style: GoogleFonts.dmSans(
+                color: AppTheme.error,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildConversationTile(ConversationSummary conv, bool isSelected) {
     final dateFormat = DateFormat('MMM d, h:mm a');
     
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: isSelected ? AppTheme.primaryColor.withValues(alpha: 0.15) : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        border: isSelected 
-            ? Border.all(color: AppTheme.primaryColor.withValues(alpha: 0.3))
-            : null,
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        leading: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: isSelected 
-                ? AppTheme.primaryColor.withValues(alpha: 0.2)
-                : AppTheme.cardDark,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(
-            conv.imageCount > 0 ? Icons.image : Icons.chat,
-            color: isSelected ? AppTheme.primaryColor : AppTheme.textSecondary,
-            size: 20,
-          ),
+    return GestureDetector(
+      onTap: () {
+        context.read<ChatProvider>().loadConversation(conv.id);
+        Navigator.pop(context);
+      },
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.primaryColor.withOpacity(0.08) : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+          border: isSelected 
+              ? Border.all(color: AppTheme.primaryColor.withOpacity(0.3))
+              : Border.all(color: Colors.transparent),
         ),
-        title: Text(
-          conv.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: isSelected ? AppTheme.textPrimary : AppTheme.textSecondary,
-            fontSize: 14,
-            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-          ),
-        ),
-        subtitle: Text(
-          dateFormat.format(conv.updatedAt),
-          style: const TextStyle(
-            color: AppTheme.textMuted,
-            fontSize: 12,
-          ),
-        ),
-        trailing: conv.imageCount > 0
-            ? Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          children: [
+            // Icon
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: isSelected 
+                    ? AppTheme.primaryColor.withOpacity(0.15)
+                    : AppTheme.inputBackground,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                conv.imageCount > 0 ? Icons.image_rounded : Icons.chat_rounded,
+                color: isSelected ? AppTheme.primaryColor : AppTheme.textMuted,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 12),
+            
+            // Content
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    conv.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.dmSans(
+                      color: isSelected ? AppTheme.textPrimary : AppTheme.textSecondary,
+                      fontSize: 14,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    dateFormat.format(conv.updatedAt),
+                    style: GoogleFonts.dmSans(
+                      color: AppTheme.textMuted,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            
+            // Delete button
+            GestureDetector(
+              onTap: () => _showDeleteDialog(conv.id, conv.title),
+              child: Container(
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
-                  color: AppTheme.accentColor.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(8),
+                  color: AppTheme.error.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.image,
-                      size: 12,
-                      color: AppTheme.accentColor,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${conv.imageCount}',
-                      style: const TextStyle(
-                        color: AppTheme.accentColor,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
+                child: Icon(
+                  Icons.delete_outline_rounded,
+                  size: 18,
+                  color: AppTheme.error,
                 ),
-              )
-            : null,
-        onTap: () {
-          context.read<ChatProvider>().loadConversation(conv.id);
-          Navigator.pop(context); // Close drawer
-        },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -260,21 +347,23 @@ class _ConversationDrawerState extends State<ConversationDrawer> {
               // User info if logged in
               if (auth.isLoggedIn) ...[
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: AppTheme.cardDark,
-                    borderRadius: BorderRadius.circular(12),
+                    color: AppTheme.inputBackground,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppTheme.border),
                   ),
                   child: Row(
                     children: [
                       CircleAvatar(
-                        radius: 18,
+                        radius: 20,
                         backgroundColor: AppTheme.primaryColor,
                         child: Text(
                           auth.user!.username[0].toUpperCase(),
-                          style: const TextStyle(
+                          style: GoogleFonts.dmSans(
                             color: Colors.white,
-                            fontWeight: FontWeight.bold,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
                           ),
                         ),
                       ),
@@ -285,14 +374,15 @@ class _ConversationDrawerState extends State<ConversationDrawer> {
                           children: [
                             Text(
                               auth.user!.username,
-                              style: const TextStyle(
+                              style: GoogleFonts.dmSans(
                                 color: AppTheme.textPrimary,
                                 fontWeight: FontWeight.w600,
+                                fontSize: 14,
                               ),
                             ),
                             Text(
                               auth.user!.email,
-                              style: const TextStyle(
+                              style: GoogleFonts.dmSans(
                                 color: AppTheme.textMuted,
                                 fontSize: 12,
                               ),
@@ -306,52 +396,45 @@ class _ConversationDrawerState extends State<ConversationDrawer> {
                 const SizedBox(height: 12),
               ],
               
+              // Action buttons
               Row(
                 children: [
                   // Settings button
                   Expanded(
-                    child: TextButton.icon(
-                      onPressed: () {
+                    child: _buildFooterButton(
+                      icon: Icons.settings_rounded,
+                      label: 'Settings',
+                      onTap: () {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Settings coming soon!')),
+                          SnackBar(
+                            content: Text('Settings coming soon!'),
+                            backgroundColor: AppTheme.textSecondary,
+                            behavior: SnackBarBehavior.floating,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
                         );
                       },
-                      icon: const Icon(Icons.settings, size: 20),
-                      label: const Text('Settings'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: AppTheme.textSecondary,
-                      ),
                     ),
                   ),
+                  const SizedBox(width: 12),
                   // Login/Logout button
                   Expanded(
-                    child: TextButton.icon(
-                      onPressed: () {
+                    child: _buildFooterButton(
+                      icon: auth.isLoggedIn ? Icons.logout_rounded : Icons.login_rounded,
+                      label: auth.isLoggedIn ? 'Logout' : 'Login',
+                      isDestructive: auth.isLoggedIn,
+                      onTap: () {
                         if (auth.isLoggedIn) {
                           auth.logout();
-                          Navigator.pop(context); // Close drawer
-                          Navigator.pushReplacement(
-                            context,
-                            MaterialPageRoute(builder: (_) => const LoginScreen()),
-                          );
-                        } else {
-                          Navigator.pop(context); // Close drawer
-                          Navigator.pushReplacement(
-                            context,
-                            MaterialPageRoute(builder: (_) => const LoginScreen()),
-                          );
                         }
+                        Navigator.pop(context);
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(builder: (_) => const LoginScreen()),
+                        );
                       },
-                      icon: Icon(
-                        auth.isLoggedIn ? Icons.logout : Icons.login,
-                        size: 20,
-                      ),
-                      label: Text(auth.isLoggedIn ? 'Logout' : 'Login'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: auth.isLoggedIn 
-                            ? Colors.redAccent 
-                            : AppTheme.primaryColor,
-                      ),
                     ),
                   ),
                 ],
@@ -360,6 +443,50 @@ class _ConversationDrawerState extends State<ConversationDrawer> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildFooterButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    bool isDestructive = false,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: isDestructive 
+              ? AppTheme.error.withOpacity(0.08) 
+              : AppTheme.inputBackground,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isDestructive 
+                ? AppTheme.error.withOpacity(0.2) 
+                : AppTheme.border,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: isDestructive ? AppTheme.error : AppTheme.textSecondary,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: GoogleFonts.dmSans(
+                color: isDestructive ? AppTheme.error : AppTheme.textSecondary,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

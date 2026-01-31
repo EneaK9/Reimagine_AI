@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     gpt_model: str = "gpt-4-turbo-preview"
     
     # Google Gemini Settings (for room redesign - image editing)
-    gemini_api_key: str = "AIzaSyB9vy5JXoUWgwSzH_2__yE1EwE7uGt396g"
+    gemini_api_key: str = ""
     gemini_model: str = "gemini-3-pro-image-preview"  # Supports image generation
     
     class Config:

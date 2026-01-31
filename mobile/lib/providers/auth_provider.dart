@@ -1,10 +1,11 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/api_service.dart';
 
 /// Authentication state management
 class AuthProvider with ChangeNotifier {
-  // TODO: Use ApiService when backend auth is implemented
-  // final ApiService _apiService = ApiService();
+  final ApiService _apiService = ApiService();
   
   User? _user;
   String? _token;
@@ -29,13 +30,13 @@ class AuthProvider with ChangeNotifier {
       _token = prefs.getString('auth_token');
       
       if (_token != null) {
-        // Validate token and get user info
-        // For now, we'll just check if token exists
-        // TODO: Add token validation endpoint
+        // Set token on API service
+        _apiService.setAuthToken(_token);
+        
+        // Load stored user data
         final userData = prefs.getString('user_data');
         if (userData != null) {
-          // Parse stored user data
-          // _user = User.fromJson(jsonDecode(userData));
+          _user = User.fromJson(jsonDecode(userData));
         }
       }
     } catch (e) {
@@ -53,21 +54,19 @@ class AuthProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      // TODO: Call actual login API
-      // For now, simulate login
-      await Future.delayed(const Duration(seconds: 1));
+      final response = await _apiService.login(email, password);
       
-      // Mock successful login
       _user = User(
-        id: 'user_123',
-        email: email,
-        username: email.split('@').first,
+        id: response.id,
+        email: response.email,
+        username: response.username,
       );
-      _token = 'mock_token_${DateTime.now().millisecondsSinceEpoch}';
+      _token = response.token;
       
-      // Store token
+      // Store credentials
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('auth_token', _token!);
+      await prefs.setString('user_data', jsonEncode(_user!.toJson()));
       
       _isLoading = false;
       notifyListeners();
@@ -87,21 +86,19 @@ class AuthProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      // TODO: Call actual register API
-      // For now, simulate registration
-      await Future.delayed(const Duration(seconds: 1));
+      final response = await _apiService.signup(username, email, password);
       
-      // Mock successful registration
       _user = User(
-        id: 'user_${DateTime.now().millisecondsSinceEpoch}',
-        email: email,
-        username: username,
+        id: response.id,
+        email: response.email,
+        username: response.username,
       );
-      _token = 'mock_token_${DateTime.now().millisecondsSinceEpoch}';
+      _token = response.token;
       
-      // Store token
+      // Store credentials
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('auth_token', _token!);
+      await prefs.setString('user_data', jsonEncode(_user!.toJson()));
       
       _isLoading = false;
       notifyListeners();
@@ -116,6 +113,12 @@ class AuthProvider with ChangeNotifier {
 
   /// Logout
   Future<void> logout() async {
+    try {
+      await _apiService.logout();
+    } catch (e) {
+      // Ignore logout errors
+    }
+    
     _user = null;
     _token = null;
     

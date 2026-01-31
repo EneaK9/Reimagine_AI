@@ -1,9 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import '../theme/app_theme.dart';
 
-/// Chat input widget with image attachment
+/// Chat input widget with image attachment - Light theme design
 class ChatInput extends StatefulWidget {
   final Function(String message) onSend;
   final Function(File image) onImageSelected;
@@ -62,7 +63,14 @@ class _ChatInputState extends State<ChatInput> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error picking image: $e')),
+          SnackBar(
+            content: Text('Error picking image: $e'),
+            backgroundColor: AppTheme.error,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
         );
       }
     }
@@ -71,39 +79,51 @@ class _ChatInputState extends State<ChatInput> {
   void _showImageSourcePicker() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppTheme.surfaceDark,
+      backgroundColor: AppTheme.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) => SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Handle bar
               Container(
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: AppTheme.textMuted,
+                  color: AppTheme.border,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 24),
+              
+              // Title
               Text(
                 'Add Room Photo',
-                style: TextStyle(
+                style: GoogleFonts.dmSerifDisplay(
+                  fontSize: 24,
                   color: AppTheme.textPrimary,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 8),
+              Text(
+                'Take a new photo or choose from gallery',
+                style: GoogleFonts.dmSans(
+                  fontSize: 14,
+                  color: AppTheme.textMuted,
+                ),
+              ),
+              const SizedBox(height: 28),
+              
+              // Options
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
                   _buildImageSourceOption(
-                    icon: Icons.camera_alt,
+                    icon: Icons.camera_alt_rounded,
                     label: 'Camera',
                     onTap: () {
                       Navigator.pop(context);
@@ -111,7 +131,7 @@ class _ChatInputState extends State<ChatInput> {
                     },
                   ),
                   _buildImageSourceOption(
-                    icon: Icons.photo_library,
+                    icon: Icons.photo_library_rounded,
                     label: 'Gallery',
                     onTap: () {
                       Navigator.pop(context);
@@ -120,7 +140,7 @@ class _ChatInputState extends State<ChatInput> {
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
             ],
           ),
         ),
@@ -136,28 +156,36 @@ class _ChatInputState extends State<ChatInput> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
+        padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 24),
         decoration: BoxDecoration(
-          color: AppTheme.cardDark,
-          borderRadius: BorderRadius.circular(16),
+          color: AppTheme.inputBackground,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppTheme.border),
         ),
         child: Column(
           children: [
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                gradient: AppTheme.primaryGradient,
+                color: AppTheme.primaryColor,
                 shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.primaryColor.withOpacity(0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
               child: Icon(icon, color: Colors.white, size: 28),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             Text(
               label,
-              style: TextStyle(
+              style: GoogleFonts.dmSans(
                 color: AppTheme.textPrimary,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ],
@@ -170,19 +198,23 @@ class _ChatInputState extends State<ChatInput> {
   Widget build(BuildContext context) {
     return Container(
       padding: EdgeInsets.only(
-        left: 16,
-        right: 16,
-        top: 12,
-        bottom: MediaQuery.of(context).padding.bottom + 12,
+        left: 20,
+        right: 20,
+        top: 16,
+        bottom: MediaQuery.of(context).padding.bottom + 16,
       ),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceDark,
+        color: AppTheme.surface,
         border: Border(
-          top: BorderSide(
-            color: AppTheme.cardDark,
-            width: 1,
-          ),
+          top: BorderSide(color: AppTheme.border),
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -190,35 +222,66 @@ class _ChatInputState extends State<ChatInput> {
           // Selected Image Preview
           if (widget.selectedImage != null) ...[
             Container(
-              height: 80,
               margin: const EdgeInsets.only(bottom: 12),
-              child: Stack(
+              child: Row(
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.file(
-                      widget.selectedImage!,
-                      height: 80,
-                      width: 80,
-                      fit: BoxFit.cover,
+                  // Image thumbnail
+                  Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.primaryColor, width: 2),
+                      boxShadow: AppTheme.cardShadow,
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Image.file(
+                        widget.selectedImage!,
+                        height: 72,
+                        width: 72,
+                        fit: BoxFit.cover,
+                      ),
                     ),
                   ),
-                  Positioned(
-                    top: 4,
-                    right: 4,
-                    child: GestureDetector(
-                      onTap: widget.onClearImage,
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.6),
-                          shape: BoxShape.circle,
+                  const SizedBox(width: 12),
+                  
+                  // Info text
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Photo attached',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textPrimary,
+                          ),
                         ),
-                        child: const Icon(
-                          Icons.close,
-                          color: Colors.white,
-                          size: 16,
+                        const SizedBox(height: 2),
+                        Text(
+                          'Describe how to redesign it',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 12,
+                            color: AppTheme.textMuted,
+                          ),
                         ),
+                      ],
+                    ),
+                  ),
+                  
+                  // Remove button
+                  GestureDetector(
+                    onTap: widget.onClearImage,
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.error.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        Icons.close_rounded,
+                        color: AppTheme.error,
+                        size: 20,
                       ),
                     ),
                   ),
@@ -232,79 +295,102 @@ class _ChatInputState extends State<ChatInput> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               // Attachment Button
-              IconButton(
-                onPressed: widget.isLoading ? null : _showImageSourcePicker,
-                icon: Container(
-                  padding: const EdgeInsets.all(8),
+              GestureDetector(
+                onTap: widget.isLoading ? null : _showImageSourcePicker,
+                child: Container(
+                  width: 48,
+                  height: 48,
                   decoration: BoxDecoration(
-                    color: AppTheme.cardDark,
-                    borderRadius: BorderRadius.circular(12),
+                    color: AppTheme.inputBackground,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppTheme.border),
                   ),
                   child: Icon(
-                    Icons.add_photo_alternate,
+                    Icons.add_photo_alternate_rounded,
                     color: widget.isLoading 
                         ? AppTheme.textMuted 
                         : AppTheme.primaryColor,
+                    size: 22,
                   ),
                 ),
               ),
+              
+              const SizedBox(width: 12),
               
               // Text Input
               Expanded(
-                child: TextField(
-                  controller: _controller,
-                  focusNode: _focusNode,
-                  enabled: !widget.isLoading,
-                  maxLines: 4,
-                  minLines: 1,
-                  textCapitalization: TextCapitalization.sentences,
-                  style: const TextStyle(color: AppTheme.textPrimary),
-                  decoration: InputDecoration(
-                    hintText: widget.selectedImage != null
-                        ? 'Describe how to redesign this room...'
-                        : 'Describe your dream room...',
-                    hintStyle: const TextStyle(color: AppTheme.textMuted),
-                    filled: true,
-                    fillColor: AppTheme.cardDark,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
-                      borderSide: BorderSide.none,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 12,
-                    ),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: AppTheme.inputBackground,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: AppTheme.border),
                   ),
-                  onChanged: (_) => setState(() {}),
-                  onSubmitted: (_) => _sendMessage(),
+                  child: TextField(
+                    controller: _controller,
+                    focusNode: _focusNode,
+                    enabled: !widget.isLoading,
+                    maxLines: 4,
+                    minLines: 1,
+                    textCapitalization: TextCapitalization.sentences,
+                    style: GoogleFonts.dmSans(
+                      color: AppTheme.textPrimary,
+                      fontSize: 15,
+                    ),
+                    decoration: InputDecoration(
+                      hintText: widget.selectedImage != null
+                          ? 'Describe the changes...'
+                          : 'Describe your dream room...',
+                      hintStyle: GoogleFonts.dmSans(
+                        color: AppTheme.textMuted,
+                        fontSize: 15,
+                      ),
+                      filled: true,
+                      fillColor: Colors.transparent,
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 14,
+                      ),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                    onSubmitted: (_) => _sendMessage(),
+                  ),
                 ),
               ),
               
-              const SizedBox(width: 8),
+              const SizedBox(width: 12),
               
               // Send Button
               GestureDetector(
                 onTap: _canSend ? _sendMessage : null,
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.all(12),
+                  width: 48,
+                  height: 48,
                   decoration: BoxDecoration(
-                    gradient: _canSend ? AppTheme.primaryGradient : null,
-                    color: _canSend ? null : AppTheme.cardDark,
-                    shape: BoxShape.circle,
+                    color: _canSend ? AppTheme.primaryColor : AppTheme.inputBackground,
+                    borderRadius: BorderRadius.circular(14),
+                    border: _canSend ? null : Border.all(color: AppTheme.border),
+                    boxShadow: _canSend ? [
+                      BoxShadow(
+                        color: AppTheme.primaryColor.withOpacity(0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ] : null,
                   ),
                   child: widget.isLoading
-                      ? const SizedBox(
-                          width: 24,
-                          height: 24,
+                      ? Padding(
+                          padding: const EdgeInsets.all(12),
                           child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
+                            strokeWidth: 2.5,
+                            color: _canSend ? Colors.white : AppTheme.primaryColor,
                           ),
                         )
                       : Icon(
-                          Icons.send_rounded,
+                          Icons.arrow_upward_rounded,
                           color: _canSend ? Colors.white : AppTheme.textMuted,
+                          size: 22,
                         ),
                 ),
               ),

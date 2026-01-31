@@ -1,13 +1,14 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shimmer/shimmer.dart';
 import '../models/message.dart';
 import '../theme/app_theme.dart';
 import 'image_gallery.dart';
 
-/// Chat message bubble widget
+/// Chat message bubble widget - Light theme design
 class ChatBubble extends StatelessWidget {
   final Message message;
   
@@ -19,9 +20,7 @@ class ChatBubble extends StatelessWidget {
   String get displayContent {
     String content = message.content;
     
-    // Remove [IMAGE_PROMPT] and everything after it for AI messages
     if (!isUser) {
-      // Use regex to find [IMAGE_PROMPT] with optional colon and remove everything after
       final regex = RegExp(r'\[IMAGE_PROMPT\]:?.*', dotAll: true);
       content = content.replaceAll(regex, '').trim();
     }
@@ -36,7 +35,7 @@ class ChatBubble extends StatelessWidget {
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       child: Row(
         mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -53,7 +52,7 @@ class ChatBubble extends StatelessWidget {
                   const SizedBox(height: 8),
                 ],
                 _buildMessageBubble(context),
-                // Show generated images below AI message (no header)
+                // Show generated images below AI message
                 if (!isUser && message.imageUrls.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   _buildImageGrid(context),
@@ -70,33 +69,44 @@ class ChatBubble extends StatelessWidget {
 
   Widget _buildAvatar() {
     return Container(
-      width: 36,
-      height: 36,
+      width: 38,
+      height: 38,
       decoration: BoxDecoration(
-        gradient: AppTheme.primaryGradient,
+        color: AppTheme.primaryColor,
         borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryColor.withOpacity(0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      child: const Icon(
-        Icons.auto_awesome,
-        color: Colors.white,
-        size: 20,
+      child: const Center(
+        child: Icon(
+          Icons.home_rounded,
+          color: Colors.white,
+          size: 20,
+        ),
       ),
     );
   }
 
   Widget _buildUserAvatar() {
     return Container(
-      width: 36,
-      height: 36,
+      width: 38,
+      height: 38,
       decoration: BoxDecoration(
-        color: AppTheme.cardDark,
+        color: AppTheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.textMuted.withValues(alpha: 0.3)),
+        border: Border.all(color: AppTheme.border),
       ),
-      child: const Icon(
-        Icons.person,
-        color: AppTheme.textSecondary,
-        size: 20,
+      child: const Center(
+        child: Icon(
+          Icons.person_rounded,
+          color: AppTheme.textSecondary,
+          size: 20,
+        ),
       ),
     );
   }
@@ -104,37 +114,39 @@ class ChatBubble extends StatelessWidget {
   Widget _buildMessageBubble(BuildContext context) {
     return Container(
       constraints: BoxConstraints(
-        maxWidth: MediaQuery.of(context).size.width * 0.7,
+        maxWidth: MediaQuery.of(context).size.width * 0.72,
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       decoration: BoxDecoration(
-        color: isUser ? AppTheme.primaryColor : AppTheme.cardDark,
+        color: isUser ? AppTheme.primaryColor : AppTheme.surface,
         borderRadius: BorderRadius.only(
           topLeft: const Radius.circular(20),
           topRight: const Radius.circular(20),
-          bottomLeft: Radius.circular(isUser ? 20 : 4),
-          bottomRight: Radius.circular(isUser ? 4 : 20),
+          bottomLeft: Radius.circular(isUser ? 20 : 6),
+          bottomRight: Radius.circular(isUser ? 6 : 20),
         ),
+        border: isUser ? null : Border.all(color: AppTheme.border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 8,
+            color: isUser 
+                ? AppTheme.primaryColor.withOpacity(0.2) 
+                : Colors.black.withOpacity(0.04),
+            blurRadius: 10,
             offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Text(
-        displayContent,  // Use filtered content
-        style: TextStyle(
+        displayContent,
+        style: GoogleFonts.dmSans(
           color: isUser ? Colors.white : AppTheme.textPrimary,
           fontSize: 15,
-          height: 1.4,
+          height: 1.5,
         ),
       ),
     );
   }
 
-  /// Build uploaded image preview (for user messages) - small thumbnail
   Widget _buildUploadedImage(BuildContext context) {
     final imagePath = message.imageUrls.first;
     
@@ -143,25 +155,19 @@ class ChatBubble extends StatelessWidget {
       height: 80,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.2),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
+        border: Border.all(color: AppTheme.border, width: 2),
+        boxShadow: AppTheme.cardShadow,
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         child: _buildImageFromPath(imagePath),
       ),
     );
   }
 
-  /// Build image from various sources (file path, URL, or base64)
   Widget _buildImageFromPath(String imagePath) {
     // Local file path
-    if (imagePath.startsWith('/') || imagePath.contains(':\\') || imagePath.contains('://') == false && !imagePath.startsWith('data:')) {
+    if (imagePath.startsWith('/') || imagePath.contains(':\\') || (!imagePath.contains('://') && !imagePath.startsWith('data:'))) {
       final file = File(imagePath);
       if (file.existsSync()) {
         return Image.file(
@@ -192,9 +198,9 @@ class ChatBubble extends StatelessWidget {
       imageUrl: imagePath,
       fit: BoxFit.cover,
       placeholder: (context, url) => Shimmer.fromColors(
-        baseColor: AppTheme.cardDark,
-        highlightColor: AppTheme.surfaceDark,
-        child: Container(color: AppTheme.cardDark),
+        baseColor: AppTheme.border,
+        highlightColor: AppTheme.surface,
+        child: Container(color: AppTheme.border),
       ),
       errorWidget: (context, url, error) => _buildImageError(),
     );
@@ -202,12 +208,13 @@ class ChatBubble extends StatelessWidget {
 
   Widget _buildImageError() {
     return Container(
-      width: 100,
-      height: 100,
-      color: AppTheme.cardDark,
-      child: const Icon(
-        Icons.broken_image,
-        color: AppTheme.textMuted,
+      color: AppTheme.inputBackground,
+      child: const Center(
+        child: Icon(
+          Icons.broken_image_outlined,
+          color: AppTheme.textMuted,
+          size: 24,
+        ),
       ),
     );
   }
@@ -221,11 +228,16 @@ class ChatBubble extends StatelessWidget {
         onTap: () => _openImageGallery(context, 0),
         child: Container(
           constraints: const BoxConstraints(
-            maxWidth: 250,
-            maxHeight: 200,
+            maxWidth: 300,
+            maxHeight: 240,
+          ),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppTheme.border),
+            boxShadow: AppTheme.cardShadow,
           ),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(15),
             child: Hero(
               tag: 'image_${message.id}_0',
               child: _buildImage(images[0]),
@@ -238,17 +250,21 @@ class ChatBubble extends StatelessWidget {
     // Multiple images - show as grid
     return Container(
       constraints: BoxConstraints(
-        maxWidth: MediaQuery.of(context).size.width * 0.6,
+        maxWidth: MediaQuery.of(context).size.width * 0.65,
+      ),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.border),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(15),
         child: GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
-            crossAxisSpacing: 4,
-            mainAxisSpacing: 4,
+            crossAxisSpacing: 2,
+            mainAxisSpacing: 2,
           ),
           itemCount: images.length,
           itemBuilder: (context, index) {
@@ -265,9 +281,7 @@ class ChatBubble extends StatelessWidget {
     );
   }
 
-  /// Build image widget - handles both URLs and base64 data URLs
   Widget _buildImage(String imageSource) {
-    // Check if it's a base64 data URL
     if (imageSource.startsWith('data:image')) {
       try {
         final base64Data = imageSource.split(',').last;
@@ -283,14 +297,13 @@ class ChatBubble extends StatelessWidget {
       }
     }
     
-    // Regular URL - use CachedNetworkImage
     return CachedNetworkImage(
       imageUrl: imageSource,
       fit: BoxFit.cover,
       placeholder: (context, url) => Shimmer.fromColors(
-        baseColor: AppTheme.cardDark,
-        highlightColor: AppTheme.surfaceDark,
-        child: Container(color: AppTheme.cardDark),
+        baseColor: AppTheme.border,
+        highlightColor: AppTheme.surface,
+        child: Container(color: AppTheme.border),
       ),
       errorWidget: (context, url, error) => _buildImageError(),
     );
@@ -310,7 +323,7 @@ class ChatBubble extends StatelessWidget {
 
   Widget _buildLoadingBubble(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -319,21 +332,22 @@ class ChatBubble extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
             decoration: BoxDecoration(
-              color: AppTheme.cardDark,
+              color: AppTheme.surface,
               borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(20),
                 topRight: Radius.circular(20),
-                bottomLeft: Radius.circular(4),
+                bottomLeft: Radius.circular(6),
                 bottomRight: Radius.circular(20),
               ),
+              border: Border.all(color: AppTheme.border),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 _buildDot(0),
-                const SizedBox(width: 4),
+                const SizedBox(width: 6),
                 _buildDot(1),
-                const SizedBox(width: 4),
+                const SizedBox(width: 6),
                 _buildDot(2),
               ],
             ),
@@ -353,7 +367,7 @@ class ChatBubble extends StatelessWidget {
           width: 8,
           height: 8,
           decoration: BoxDecoration(
-            color: AppTheme.primaryColor.withValues(alpha: 0.3 + (0.7 * value)),
+            color: AppTheme.primaryColor.withOpacity(0.3 + (0.7 * value)),
             shape: BoxShape.circle,
           ),
         );

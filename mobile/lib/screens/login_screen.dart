@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../theme/app_theme.dart';
 import 'signup_screen.dart';
 import 'chat_screen.dart';
 
-/// Login screen
+/// Login screen - Warm light theme design
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -46,32 +47,28 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: AppTheme.backgroundGradient,
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 60),
-                _buildLogo(),
-                const SizedBox(height: 48),
-                _buildForm(),
-                const SizedBox(height: 24),
-                _buildLoginButton(),
-                const SizedBox(height: 16),
-                _buildDivider(),
-                const SizedBox(height: 16),
-                _buildSocialButtons(),
-                const SizedBox(height: 32),
-                _buildSignupLink(),
-                const SizedBox(height: 16),
-                _buildSkipButton(),
-              ],
-            ),
+      backgroundColor: AppTheme.background,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 48),
+              _buildLogo(),
+              const SizedBox(height: 48),
+              _buildForm(),
+              const SizedBox(height: 24),
+              _buildLoginButton(),
+              const SizedBox(height: 20),
+              _buildDivider(),
+              const SizedBox(height: 20),
+              _buildSocialButtons(),
+              const SizedBox(height: 32),
+              _buildSignupLink(),
+              const SizedBox(height: 12),
+              _buildSkipButton(),
+            ],
           ),
         ),
       ),
@@ -82,39 +79,41 @@ class _LoginScreenState extends State<LoginScreen> {
     return Column(
       children: [
         Container(
-          padding: const EdgeInsets.all(20),
+          width: 88,
+          height: 88,
           decoration: BoxDecoration(
-            gradient: AppTheme.primaryGradient,
-            shape: BoxShape.circle,
+            color: AppTheme.primaryColor,
+            borderRadius: BorderRadius.circular(24),
             boxShadow: [
               BoxShadow(
-                color: AppTheme.primaryColor.withValues(alpha: 0.4),
-                blurRadius: 30,
-                spreadRadius: 5,
+                color: AppTheme.primaryColor.withOpacity(0.35),
+                blurRadius: 24,
+                offset: const Offset(0, 8),
               ),
             ],
           ),
-          child: const Icon(
-            Icons.home_rounded,
-            size: 48,
-            color: Colors.white,
+          child: const Center(
+            child: Icon(
+              Icons.home_rounded,
+              size: 44,
+              color: Colors.white,
+            ),
           ),
         ),
-        const SizedBox(height: 24),
-        const Text(
-          'ReimagineAI',
-          style: TextStyle(
+        const SizedBox(height: 28),
+        Text(
+          'AI Home Designer',
+          style: GoogleFonts.dmSerifDisplay(
             color: AppTheme.textPrimary,
-            fontSize: 32,
-            fontWeight: FontWeight.bold,
+            fontSize: 30,
           ),
         ),
         const SizedBox(height: 8),
-        const Text(
+        Text(
           'Transform your spaces with AI',
-          style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 16,
+          style: GoogleFonts.dmSans(
+            color: AppTheme.textMuted,
+            fontSize: 15,
           ),
         ),
       ],
@@ -127,73 +126,75 @@ class _LoginScreenState extends State<LoginScreen> {
       child: Column(
         children: [
           // Email field
-          TextFormField(
-            controller: _emailController,
-            keyboardType: TextInputType.emailAddress,
-            style: const TextStyle(color: AppTheme.textPrimary),
-            decoration: InputDecoration(
-              labelText: 'Email',
-              labelStyle: const TextStyle(color: AppTheme.textMuted),
-              prefixIcon: const Icon(Icons.email_outlined, color: AppTheme.textMuted),
-              filled: true,
-              fillColor: AppTheme.cardDark,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide.none,
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: const BorderSide(color: AppTheme.primaryColor, width: 2),
-              ),
+          Container(
+            decoration: BoxDecoration(
+              color: AppTheme.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppTheme.border),
             ),
-            validator: (value) {
-              if (value == null || value.isEmpty) {
-                return 'Please enter your email';
-              }
-              if (!value.contains('@')) {
-                return 'Please enter a valid email';
-              }
-              return null;
-            },
+            child: TextFormField(
+              controller: _emailController,
+              keyboardType: TextInputType.emailAddress,
+              style: GoogleFonts.dmSans(color: AppTheme.textPrimary),
+              decoration: InputDecoration(
+                labelText: 'Email',
+                labelStyle: GoogleFonts.dmSans(color: AppTheme.textMuted),
+                prefixIcon: const Icon(Icons.email_outlined, color: AppTheme.textMuted),
+                filled: true,
+                fillColor: Colors.transparent,
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              ),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Please enter your email';
+                }
+                if (!value.contains('@')) {
+                  return 'Please enter a valid email';
+                }
+                return null;
+              },
+            ),
           ),
           const SizedBox(height: 16),
           
           // Password field
-          TextFormField(
-            controller: _passwordController,
-            obscureText: _obscurePassword,
-            style: const TextStyle(color: AppTheme.textPrimary),
-            decoration: InputDecoration(
-              labelText: 'Password',
-              labelStyle: const TextStyle(color: AppTheme.textMuted),
-              prefixIcon: const Icon(Icons.lock_outlined, color: AppTheme.textMuted),
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                  color: AppTheme.textMuted,
-                ),
-                onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-              ),
-              filled: true,
-              fillColor: AppTheme.cardDark,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide.none,
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: const BorderSide(color: AppTheme.primaryColor, width: 2),
-              ),
+          Container(
+            decoration: BoxDecoration(
+              color: AppTheme.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppTheme.border),
             ),
-            validator: (value) {
-              if (value == null || value.isEmpty) {
-                return 'Please enter your password';
-              }
-              if (value.length < 6) {
-                return 'Password must be at least 6 characters';
-              }
-              return null;
-            },
+            child: TextFormField(
+              controller: _passwordController,
+              obscureText: _obscurePassword,
+              style: GoogleFonts.dmSans(color: AppTheme.textPrimary),
+              decoration: InputDecoration(
+                labelText: 'Password',
+                labelStyle: GoogleFonts.dmSans(color: AppTheme.textMuted),
+                prefixIcon: const Icon(Icons.lock_outlined, color: AppTheme.textMuted),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                    color: AppTheme.textMuted,
+                  ),
+                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                ),
+                filled: true,
+                fillColor: Colors.transparent,
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              ),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Please enter your password';
+                }
+                if (value.length < 6) {
+                  return 'Password must be at least 6 characters';
+                }
+                return null;
+              },
+            ),
           ),
           
           // Forgot password
@@ -201,14 +202,21 @@ class _LoginScreenState extends State<LoginScreen> {
             alignment: Alignment.centerRight,
             child: TextButton(
               onPressed: () {
-                // TODO: Forgot password
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Forgot password coming soon!')),
+                  SnackBar(
+                    content: const Text('Forgot password coming soon!'),
+                    backgroundColor: AppTheme.textSecondary,
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
                 );
               },
-              child: const Text(
+              child: Text(
                 'Forgot Password?',
-                style: TextStyle(color: AppTheme.primaryColor),
+                style: GoogleFonts.dmSans(
+                  color: AppTheme.primaryColor,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
           ),
@@ -220,13 +228,14 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget _buildLoginButton() {
     return Consumer<AuthProvider>(
       builder: (context, auth, child) {
-        // Show error if any
         if (auth.error != null) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(auth.error!),
-                backgroundColor: Colors.red,
+                backgroundColor: AppTheme.error,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
             );
             auth.clearError();
@@ -245,6 +254,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 borderRadius: BorderRadius.circular(16),
               ),
               elevation: 0,
+              shadowColor: AppTheme.primaryColor.withOpacity(0.3),
             ),
             child: auth.isLoading
                 ? const SizedBox(
@@ -252,12 +262,12 @@ class _LoginScreenState extends State<LoginScreen> {
                     height: 24,
                     child: CircularProgressIndicator(
                       color: Colors.white,
-                      strokeWidth: 2,
+                      strokeWidth: 2.5,
                     ),
                   )
-                : const Text(
+                : Text(
                     'Login',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                    style: GoogleFonts.dmSans(fontSize: 16, fontWeight: FontWeight.w600),
                   ),
           ),
         );
@@ -266,34 +276,43 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Widget _buildDivider() {
-    return const Row(
+    return Row(
       children: [
-        Expanded(child: Divider(color: AppTheme.cardDark)),
+        Expanded(child: Divider(color: AppTheme.border)),
         Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Text(
             'or continue with',
-            style: TextStyle(color: AppTheme.textMuted, fontSize: 14),
+            style: GoogleFonts.dmSans(color: AppTheme.textMuted, fontSize: 13),
           ),
         ),
-        Expanded(child: Divider(color: AppTheme.cardDark)),
+        Expanded(child: Divider(color: AppTheme.border)),
       ],
     );
   }
 
   Widget _buildSocialButtons() {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
       children: [
         _buildSocialButton(Icons.g_mobiledata, 'Google', () {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Google login coming soon!')),
+            SnackBar(
+              content: const Text('Google login coming soon!'),
+              backgroundColor: AppTheme.textSecondary,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
           );
         }),
-        const SizedBox(width: 16),
+        const SizedBox(width: 12),
         _buildSocialButton(Icons.apple, 'Apple', () {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Apple login coming soon!')),
+            SnackBar(
+              content: const Text('Apple login coming soon!'),
+              backgroundColor: AppTheme.textSecondary,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
           );
         }),
       ],
@@ -302,15 +321,28 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Widget _buildSocialButton(IconData icon, String label, VoidCallback onTap) {
     return Expanded(
-      child: OutlinedButton.icon(
-        onPressed: onTap,
-        icon: Icon(icon, color: AppTheme.textPrimary),
-        label: Text(label, style: const TextStyle(color: AppTheme.textPrimary)),
-        style: OutlinedButton.styleFrom(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
           padding: const EdgeInsets.symmetric(vertical: 14),
-          side: const BorderSide(color: AppTheme.cardDark),
-          shape: RoundedRectangleBorder(
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
             borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppTheme.border),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: AppTheme.textPrimary, size: 24),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: GoogleFonts.dmSans(
+                  color: AppTheme.textPrimary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -321,9 +353,9 @@ class _LoginScreenState extends State<LoginScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const Text(
+        Text(
           "Don't have an account? ",
-          style: TextStyle(color: AppTheme.textSecondary),
+          style: GoogleFonts.dmSans(color: AppTheme.textMuted),
         ),
         TextButton(
           onPressed: () {
@@ -332,9 +364,9 @@ class _LoginScreenState extends State<LoginScreen> {
               MaterialPageRoute(builder: (_) => const SignupScreen()),
             );
           },
-          child: const Text(
+          child: Text(
             'Sign up',
-            style: TextStyle(
+            style: GoogleFonts.dmSans(
               color: AppTheme.primaryColor,
               fontWeight: FontWeight.w600,
             ),
@@ -345,16 +377,21 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Widget _buildSkipButton() {
-    return TextButton(
-      onPressed: () {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const ChatScreen()),
-        );
-      },
-      child: const Text(
-        'Skip for now →',
-        style: TextStyle(color: AppTheme.textMuted),
+    return Center(
+      child: TextButton(
+        onPressed: () {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const ChatScreen()),
+          );
+        },
+        child: Text(
+          'Skip for now →',
+          style: GoogleFonts.dmSans(
+            color: AppTheme.textMuted,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
       ),
     );
   }

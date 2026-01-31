@@ -132,6 +132,55 @@ class User(UserBase):
         from_attributes = True
 
 
+# ============ Auth Schemas ============
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "email": "user@example.com",
+                "password": "password123"
+            }
+        }
+
+
+class SignupRequest(BaseModel):
+    username: str
+    email: str
+    password: str
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "username": "johndoe",
+                "email": "john@example.com",
+                "password": "password123"
+            }
+        }
+
+
+class AuthResponse(BaseModel):
+    id: str
+    username: str
+    email: str
+    token: str
+    created_at: Optional[str] = None
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": "user_abc123",
+                "username": "johndoe",
+                "email": "john@example.com",
+                "token": "eyJhbGciOiJIUzI1NiIs...",
+                "created_at": "2024-01-15T10:30:00"
+            }
+        }
+
+
 # ============ Health Check ============
 
 class HealthCheck(BaseModel):

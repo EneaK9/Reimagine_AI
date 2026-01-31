@@ -5,6 +5,7 @@ import '../config/api_config.dart';
 /// API Service for communicating with the backend
 class ApiService {
   late final Dio _dio;
+  String? _authToken;
 
   ApiService() {
     _dio = Dio(BaseOptions(
@@ -23,6 +24,65 @@ class ApiService {
       responseBody: true,
       logPrint: (obj) => print('[API] $obj'),
     ));
+  }
+
+  /// Set auth token for authenticated requests
+  void setAuthToken(String? token) {
+    _authToken = token;
+    if (token != null) {
+      _dio.options.headers['Authorization'] = 'Bearer $token';
+    } else {
+      _dio.options.headers.remove('Authorization');
+    }
+  }
+
+  // ============ Auth Methods ============
+
+  /// Login user
+  Future<AuthResponse> login(String email, String password) async {
+    try {
+      final response = await _dio.post(
+        ApiConfig.login,
+        data: {
+          'email': email,
+          'password': password,
+        },
+      );
+      final authResponse = AuthResponse.fromJson(response.data);
+      setAuthToken(authResponse.token);
+      return authResponse;
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Sign up new user
+  Future<AuthResponse> signup(String username, String email, String password) async {
+    try {
+      final response = await _dio.post(
+        ApiConfig.signup,
+        data: {
+          'username': username,
+          'email': email,
+          'password': password,
+        },
+      );
+      final authResponse = AuthResponse.fromJson(response.data);
+      setAuthToken(authResponse.token);
+      return authResponse;
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Logout user
+  Future<void> logout() async {
+    try {
+      await _dio.post(ApiConfig.logout);
+    } catch (e) {
+      // Ignore logout errors
+    }
+    setAuthToken(null);
   }
 
   /// Send a chat message
@@ -94,6 +154,15 @@ class ApiService {
     try {
       final response = await _dio.get('${ApiConfig.conversations}/$conversationId');
       return response.data;
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Delete a conversation
+  Future<void> deleteConversation(String conversationId) async {
+    try {
+      await _dio.delete('${ApiConfig.conversations}/$conversationId');
     } on DioException catch (e) {
       throw _handleError(e);
     }
@@ -275,5 +344,42 @@ class GeneratedImage {
       promptUsed: json['prompt_used'] ?? '',
       style: json['style'] ?? '',
     );
+  }
+}
+
+/// Auth Response from API
+class AuthResponse {
+  final String id;
+  final String username;
+  final String email;
+  final String token;
+  final String? createdAt;
+
+  AuthResponse({
+    required this.id,
+    required this.username,
+    required this.email,
+    required this.token,
+    this.createdAt,
+  });
+
+  factory AuthResponse.fromJson(Map<String, dynamic> json) {
+    return AuthResponse(
+      id: json['id'] ?? '',
+      username: json['username'] ?? '',
+      email: json['email'] ?? '',
+      token: json['token'] ?? '',
+      createdAt: json['created_at'],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'username': username,
+      'email': email,
+      'token': token,
+      'created_at': createdAt,
+    };
   }
 }

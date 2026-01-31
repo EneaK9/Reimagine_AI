@@ -25,13 +25,21 @@ class Conversation {
   }
 
   factory Conversation.fromJson(Map<String, dynamic> json) {
+    // Parse messages and filter out system messages
+    final allMessages = (json['messages'] as List?)
+            ?.map((m) => Message.fromJson(m))
+            .toList() ??
+        [];
+    
+    // Filter out system messages (they're for internal use only)
+    final visibleMessages = allMessages
+        .where((m) => m.role != MessageRole.system)
+        .toList();
+    
     return Conversation(
       id: json['id'] ?? '',
       title: json['title'] ?? 'Untitled',
-      messages: (json['messages'] as List?)
-              ?.map((m) => Message.fromJson(m))
-              .toList() ??
-          [],
+      messages: visibleMessages,
       createdAt: json['created_at'] != null
           ? DateTime.parse(json['created_at'])
           : DateTime.now(),

@@ -195,15 +195,18 @@ natural lighting, architectural digest style, warm and inviting atmosphere."""
         image_base64: str,
         edit_instruction: str,
         style: str = "modern",
+        max_retries: int = 3,
     ) -> List[str]:
         """
         Make PRECISE edits to a room image.
         Only changes what the user specifically asks for.
+        Includes retry logic for handling 503 overloaded errors.
         
         Args:
             image_base64: Base64 encoded image (can be original or previously generated)
             edit_instruction: User's specific request (e.g., "make the walls dark blue")
             style: Optional style hint
+            max_retries: Maximum retry attempts on 503 errors
         """
         if not self.client:
             print("Gemini API key not set")
@@ -235,31 +238,49 @@ Make the edit now."""
             
             results = []
             
-            try:
-                print(f"Editing image with instruction: {edit_instruction[:50]}...")
-                print(f"Using model: {self.model}")
-                
-                # Call Gemini with precise edit instruction
-                response = self.client.models.generate_content(
-                    model=self.model,
-                    contents=[prompt, image_part],
-                    config=types.GenerateContentConfig(
-                        response_modalities=["TEXT", "IMAGE"],
+            # Retry loop for handling 503 errors
+            for attempt in range(max_retries):
+                try:
+                    print(f"Editing image with instruction: {edit_instruction[:50]}...")
+                    print(f"Using model: {self.model}" + (f" (attempt {attempt + 1}/{max_retries})" if attempt > 0 else ""))
+                    
+                    # Call Gemini with precise edit instruction
+                    response = self.client.models.generate_content(
+                        model=self.model,
+                        contents=[prompt, image_part],
+                        config=types.GenerateContentConfig(
+                            response_modalities=["TEXT", "IMAGE"],
+                        )
                     )
-                )
-                
-                # Extract generated image from response
-                for part in response.candidates[0].content.parts:
-                    if part.inline_data is not None:
-                        img_base64 = base64.b64encode(part.inline_data.data).decode('utf-8')
-                        mime_type = part.inline_data.mime_type or "image/png"
-                        data_url = f"data:{mime_type};base64,{img_base64}"
-                        results.append(data_url)
-                        print(f"✓ Generated edited image")
+                    
+                    # Extract generated image from response
+                    for part in response.candidates[0].content.parts:
+                        if part.inline_data is not None:
+                            img_base64 = base64.b64encode(part.inline_data.data).decode('utf-8')
+                            mime_type = part.inline_data.mime_type or "image/png"
+                            data_url = f"data:{mime_type};base64,{img_base64}"
+                            results.append(data_url)
+                            print(f"✓ Generated edited image")
+                            break
+                    
+                    # Success - break out of retry loop
+                    if results:
                         break
                         
-            except Exception as e:
-                print(f"Gemini edit error: {e}")
+                except Exception as e:
+                    error_str = str(e)
+                    # Check if it's a 503 overloaded error
+                    if "503" in error_str or "UNAVAILABLE" in error_str or "overloaded" in error_str.lower():
+                        if attempt < max_retries - 1:
+                            wait_time = (attempt + 1) * 3  # 3s, 6s, 9s
+                            print(f"⏳ Gemini overloaded (503), retrying in {wait_time}s... (attempt {attempt + 1}/{max_retries})")
+                            await asyncio.sleep(wait_time)
+                            continue
+                        else:
+                            print(f"❌ Gemini still overloaded after {max_retries} attempts")
+                    else:
+                        print(f"Gemini edit error: {e}")
+                        break
             
             print(f"Generated {len(results)} edited images with Gemini")
             return results

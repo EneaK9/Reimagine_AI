@@ -1,0 +1,22 @@
+{
+  "user_a657173a2b74": {
+    "id": "user_a657173a2b74",
+    "username": "enea",
+    "email": "enea@shfa.ai",
+    "password_hash": "d9d1b23bb219c21fff1dbe0a8f2d5308adf62c28c39286c4cb98da9999f150ab",
+    "salt": "b85b6a783a0eb3377f8aa5826ac1c2b1",
+    "token": "UzSzA_7P2FkCE99ky2hTUblWbcorXZMC3SwjOgL__Xw",
+    "created_at": "2026-01-15T15:02:24.263855",
+    "updated_at": "2026-01-28T17:33:08.400690"
+  },
+  "user_d4bf987c4b52": {
+    "id": "user_d4bf987c4b52",
+    "username": "enea00",
+    "email": "eneakuca0@gmail.com",
+    "password_hash": "84cecf795f47acb022ce0dcef501a4acfe897c991c797a23cabe2a6a98bbfd9e",
+    "salt": "0a75e9aa0e67606b46621cd911aab56c",
+    "token": "ilGcrex9FQzhcq2HdW9oaqjevrK2T95r1kDAwcVcIV8",
+    "created_at": "2026-01-28T17:23:10.088853",
+    "updated_at": "2026-01-28T17:23:10.088894"
+  }
+}
