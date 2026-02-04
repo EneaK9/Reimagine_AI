@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 from .config import get_settings
-from .routers import chat, images, auth, rooms
+from .routers import chat, images, auth, rooms, depth
 from .models.schemas import HealthCheck
 
 settings = get_settings()
@@ -76,6 +76,7 @@ app.include_router(auth.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(images.router, prefix="/api/v1")
 app.include_router(rooms.router, prefix="/api/v1")
+app.include_router(depth.router, prefix="/api/v1")
 
 
 # ============ Root Endpoints ============

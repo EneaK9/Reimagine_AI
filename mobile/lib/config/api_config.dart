@@ -1,14 +1,7 @@
 /// API Configuration for ReimagineAI
 class ApiConfig {
-  // Change this to your backend URL based on your platform:
-  // - Windows/macOS/Linux desktop: http://localhost:8000
-  // - Android emulator: http://10.0.2.2:8000
-  // - iOS simulator: http://localhost:8000
-  // - Physical device: http://YOUR_COMPUTER_IP:8000
-  
-  // static const String baseUrl = 'http://localhost:8000'; // Windows desktop / Web
-  // static const String baseUrl = 'http://10.0.2.2:8000'; // Android emulator
-  static const String baseUrl = 'http://192.168.0.92:8000'; // Physical device (your computer's IP)
+  // Your computer's IP - change this if your IP changes
+  static const String baseUrl = 'http://192.168.0.252:8000';
   
   static const String apiVersion = '/api/v1';
   
@@ -28,14 +21,23 @@ class ApiConfig {
   static const String analyzeRoom = '$apiVersion/images/analyze';
   static const String redesignRoom = '$apiVersion/images/redesign';
   
-  // Room/3D Scanning Endpoints
+  // Room/3D Scanning Endpoints (Legacy - Unity-based)
   static const String rooms = '$apiVersion/rooms';
   static const String roomUpload = '$apiVersion/rooms/upload';
   static String roomById(String id) => '$apiVersion/rooms/$id';
   static String roomEdit(String id) => '$apiVersion/rooms/$id/edit';
   static String roomGenerateTexture(String id) => '$apiVersion/rooms/$id/generate-texture';
   
+  // Depth/3D Mesh Endpoints (Photo-based)
+  static const String depthGenerateMesh = '$apiVersion/depth/generate-mesh';
+  static const String depthGenerateMeshUpload = '$apiVersion/depth/generate-mesh/upload';
+  static const String depthMeshes = '$apiVersion/depth/meshes';
+  static String depthMesh(String meshId) => '$apiVersion/depth/mesh/$meshId';
+  static String depthMeshInfo(String meshId) => '$apiVersion/depth/mesh/$meshId/info';
+  static const String depthUpdateMesh = '$apiVersion/depth/update-mesh';
+  
   // Timeouts
-  static const Duration connectTimeout = Duration(seconds: 30);
-  static const Duration receiveTimeout = Duration(seconds: 120); // Image generation can take time
+  static const Duration connectTimeout = Duration(seconds: 15);
+  static const Duration receiveTimeout = Duration(seconds: 120); // Normal operations
+  static const Duration longReceiveTimeout = Duration(minutes: 10); // Heavy operations (mesh, AI)
 }

@@ -8,6 +8,15 @@ python-multipart>=0.0.6
 openai>=1.12.0
 google-genai>=1.0.0  # Gemini API for image editing
 
+# Depth Estimation & 3D Mesh Generation
+torch>=2.0.0
+torchvision>=0.15.0
+timm>=0.9.0  # Required for MiDaS depth estimation
+opencv-python>=4.8.0  # Required for MiDaS transforms
+open3d>=0.17.0  # 3D mesh generation and processing
+numpy>=1.24.0
+scipy>=1.10.0
+
 # Database (optional for MVP)
 sqlalchemy>=2.0.25
 # asyncpg>=0.29.0  # Uncomment when using PostgreSQL

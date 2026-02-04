@@ -45,7 +45,8 @@ class ConversationService:
                     created_at=datetime.fromisoformat(conv_data['created_at']) if conv_data.get('created_at') else datetime.utcnow(),
                     updated_at=datetime.fromisoformat(conv_data['updated_at']) if conv_data.get('updated_at') else datetime.utcnow(),
                     original_image=conv_data.get('original_image'),
-                    last_generated_image=conv_data.get('last_generated_image')
+                    last_generated_image=conv_data.get('last_generated_image'),
+                    mesh_id=conv_data.get('mesh_id')
                 )
                 self._conversations[conv_id] = conversation
             except Exception as e:
@@ -68,7 +69,8 @@ class ConversationService:
             'created_at': conversation.created_at.isoformat(),
             'updated_at': conversation.updated_at.isoformat(),
             'original_image': getattr(conversation, 'original_image', None),
-            'last_generated_image': getattr(conversation, 'last_generated_image', None)
+            'last_generated_image': getattr(conversation, 'last_generated_image', None),
+            'mesh_id': getattr(conversation, 'mesh_id', None)
         }
         json_storage.save_conversation(conversation.id, conv_data)
     
@@ -220,6 +222,25 @@ class ConversationService:
         if conversation:
             conversation.original_image = image_base64
             self._save_conversation(conversation)
+    
+    def store_mesh_reference(self, conversation_id: str, mesh_id: str) -> None:
+        """Store the mesh ID associated with this conversation."""
+        conversation = self._conversations.get(conversation_id)
+        if conversation:
+            conversation.mesh_id = mesh_id
+            self._save_conversation(conversation)
+            print(f"[ConversationService] Stored mesh {mesh_id} for conversation {conversation_id}")
+    
+    def get_mesh_id(self, conversation_id: str) -> Optional[str]:
+        """Get the mesh ID associated with a conversation."""
+        conversation = self._conversations.get(conversation_id)
+        if conversation:
+            return getattr(conversation, 'mesh_id', None)
+        return None
+    
+    def has_mesh(self, conversation_id: str) -> bool:
+        """Check if a conversation has an associated mesh."""
+        return self.get_mesh_id(conversation_id) is not None
 
 
 # Singleton instance

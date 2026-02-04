@@ -2,12 +2,16 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import '../config/api_config.dart';
 
-/// API Service for communicating with the backend
+/// API Service for communicating with the backend (Singleton)
 class ApiService {
+  // Singleton instance
+  static final ApiService _instance = ApiService._internal();
+  factory ApiService() => _instance;
+  
   late final Dio _dio;
   String? _authToken;
 
-  ApiService() {
+  ApiService._internal() {
     _dio = Dio(BaseOptions(
       baseUrl: ApiConfig.baseUrl,
       connectTimeout: ApiConfig.connectTimeout,
@@ -90,6 +94,7 @@ class ApiService {
     required String message,
     String? conversationId,
     String? imageBase64,
+    String? meshId,  // Pass mesh_id so backend can edit the mesh
   }) async {
     try {
       final response = await _dio.post(
@@ -98,6 +103,7 @@ class ApiService {
           'message': message,
           'conversation_id': conversationId,
           'image_base64': imageBase64,
+          if (meshId != null) 'mesh_id': meshId,
         },
       );
 
@@ -112,11 +118,13 @@ class ApiService {
     required String message,
     required File imageFile,
     String? conversationId,
+    String? meshId,  // Pass mesh_id so backend can edit the mesh
   }) async {
     try {
       final formData = FormData.fromMap({
         'message': message,
         'conversation_id': conversationId,
+        if (meshId != null) 'mesh_id': meshId,
         'image': await MultipartFile.fromFile(
           imageFile.path,
           filename: imageFile.path.split('/').last,
@@ -224,6 +232,115 @@ class ApiService {
     }
   }
 
+  // ============ Depth/3D Mesh Methods ============
+
+  /// Generate a 3D mesh from a room photo using depth estimation
+  Future<Map<String, dynamic>> generateMeshFromPhoto(File imageFile) async {
+    try {
+      final formData = FormData.fromMap({
+        'image': await MultipartFile.fromFile(
+          imageFile.path,
+          filename: imageFile.path.split('/').last,
+        ),
+      });
+
+      final response = await _dio.post(
+        ApiConfig.depthGenerateMeshUpload,
+        data: formData,
+        options: Options(
+          headers: {'Content-Type': 'multipart/form-data'},
+          sendTimeout: ApiConfig.longReceiveTimeout,
+          receiveTimeout: ApiConfig.longReceiveTimeout, // 10 min for CPU processing
+        ),
+      );
+
+      return response.data;
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Generate a 3D mesh from a base64 encoded image
+  Future<Map<String, dynamic>> generateMeshFromBase64({
+    required String imageBase64,
+    String? conversationId,
+  }) async {
+    try {
+      final response = await _dio.post(
+        ApiConfig.depthGenerateMesh,
+        data: {
+          'image_base64': imageBase64,
+          'conversation_id': conversationId,
+        },
+        options: Options(
+          receiveTimeout: ApiConfig.longReceiveTimeout, // 10 min for CPU processing
+        ),
+      );
+
+      return response.data;
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Get mesh info by ID
+  Future<Map<String, dynamic>> getMeshInfo(String meshId) async {
+    try {
+      final response = await _dio.get(ApiConfig.depthMeshInfo(meshId));
+      return response.data;
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// List all generated meshes
+  Future<List<Map<String, dynamic>>> listMeshes() async {
+    try {
+      final response = await _dio.get(ApiConfig.depthMeshes);
+      return List<Map<String, dynamic>>.from(response.data['meshes'] ?? []);
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Delete a mesh by ID
+  Future<void> deleteMesh(String meshId) async {
+    try {
+      await _dio.delete(ApiConfig.depthMesh(meshId));
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Get full URL for a mesh (for loading in ModelViewer)
+  String getFullMeshUrl(String meshPath) {
+    // meshPath is like /api/v1/depth/mesh/mesh_abc123
+    return '${ApiConfig.baseUrl}$meshPath';
+  }
+
+  /// Regenerate mesh from edited image
+  Future<Map<String, dynamic>> updateMesh({
+    required String imageBase64,
+    String? conversationId,
+  }) async {
+    try {
+      final response = await _dio.post(
+        ApiConfig.depthUpdateMesh,
+        data: {
+          'image_base64': imageBase64,
+          'conversation_id': conversationId,
+        },
+        options: Options(
+          receiveTimeout: ApiConfig.longReceiveTimeout, // 10 min for CPU processing
+        ),
+      );
+
+      return response.data;
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
   /// Handle API errors
   ApiException _handleError(DioException e) {
     switch (e.type) {
@@ -261,12 +378,16 @@ class ChatResponse {
   final String message;
   final List<String> generatedImages;
   final List<Map<String, dynamic>> furnitureSuggestions;
+  final String? meshUrl;  // URL to updated 3D mesh (if conversation has mesh)
+  final String? meshId;   // Mesh ID for further edits
 
   ChatResponse({
     required this.conversationId,
     required this.message,
     this.generatedImages = const [],
     this.furnitureSuggestions = const [],
+    this.meshUrl,
+    this.meshId,
   });
 
   factory ChatResponse.fromJson(Map<String, dynamic> json) {
@@ -277,6 +398,8 @@ class ChatResponse {
       furnitureSuggestions: List<Map<String, dynamic>>.from(
         json['furniture_suggestions'] ?? [],
       ),
+      meshUrl: json['mesh_url'],
+      meshId: json['mesh_id'],
     );
   }
 }

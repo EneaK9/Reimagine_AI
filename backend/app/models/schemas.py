@@ -41,13 +41,15 @@ class ChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
     image_base64: Optional[str] = None  # Base64 encoded image
+    mesh_id: Optional[str] = None  # ID of 3D mesh to edit
     
     class Config:
         json_schema_extra = {
             "example": {
                 "message": "Make my living room more modern with plants",
                 "conversation_id": "conv_123",
-                "image_base64": None
+                "image_base64": None,
+                "mesh_id": None
             }
         }
 
@@ -57,6 +59,8 @@ class ChatResponse(BaseModel):
     message: str
     generated_images: List[str] = []  # URLs to generated images
     furniture_suggestions: List[dict] = []
+    mesh_url: Optional[str] = None  # URL to updated 3D mesh (if conversation has mesh)
+    mesh_id: Optional[str] = None  # ID of mesh for future edits
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -101,6 +105,8 @@ class Conversation(BaseModel):
     # For image editing context - stores images for follow-up edits
     original_image: Optional[str] = None  # Base64 of originally uploaded image
     last_generated_image: Optional[str] = None  # Base64 of last generated image for edits
+    # For 3D mesh generation
+    mesh_id: Optional[str] = None  # ID of associated 3D mesh
     
     
 class ConversationSummary(BaseModel):
@@ -179,6 +185,37 @@ class AuthResponse(BaseModel):
                 "created_at": "2024-01-15T10:30:00"
             }
         }
+
+
+# ============ Depth/Mesh Schemas ============
+
+class MeshGenerationRequest(BaseModel):
+    image_base64: str
+    conversation_id: Optional[str] = None
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "image_base64": "<base64 encoded image>",
+                "conversation_id": "conv_123"
+            }
+        }
+
+
+class MeshGenerationResponse(BaseModel):
+    mesh_id: str
+    mesh_url: str
+    depth_map_url: str
+    conversation_id: Optional[str] = None
+    original_size: dict = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class MeshInfo(BaseModel):
+    mesh_id: str
+    mesh_url: str
+    size_bytes: int
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 # ============ Health Check ============

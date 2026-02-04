@@ -597,11 +597,13 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _buildInputArea() {
     return Consumer<ChatProvider>(
       builder: (context, provider, child) {
-        if (provider.error != null) {
+        final errorMessage = provider.error;
+        if (errorMessage != null) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text(provider.error!),
+                content: Text(errorMessage),
                 backgroundColor: AppTheme.error,
                 behavior: SnackBarBehavior.floating,
                 shape: RoundedRectangleBorder(

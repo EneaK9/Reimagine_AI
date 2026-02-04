@@ -13,6 +13,8 @@ class ChatProvider with ChangeNotifier {
   bool _isLoading = false;
   String? _error;
   File? _selectedImage;
+  String? _currentMeshUrl;  // URL to 3D mesh for this conversation
+  String? _currentMeshId;   // Mesh ID for editing the mesh
 
   // Getters
   Conversation? get currentConversation => _currentConversation;
@@ -22,10 +24,15 @@ class ChatProvider with ChangeNotifier {
   String? get error => _error;
   File? get selectedImage => _selectedImage;
   bool get hasSelectedImage => _selectedImage != null;
+  String? get currentMeshUrl => _currentMeshUrl;
+  String? get currentMeshId => _currentMeshId;
+  bool get hasMesh => _currentMeshUrl != null && _currentMeshId != null;
 
   /// Start a new conversation
   void startNewConversation() {
     _currentConversation = Conversation.create();
+    _currentMeshUrl = null;  // Clear mesh when starting new conversation
+    _currentMeshId = null;   // Clear mesh ID too
     _error = null;
     notifyListeners();
   }
@@ -40,6 +47,32 @@ class ChatProvider with ChangeNotifier {
   void clearSelectedImage() {
     _selectedImage = null;
     notifyListeners();
+  }
+
+  /// Set current mesh URL and ID (from Quick Scan or API response)
+  void setCurrentMesh(String? meshId, String? meshUrl) {
+    _currentMeshId = meshId;
+    _currentMeshUrl = meshUrl;
+    notifyListeners();
+  }
+
+  /// Set current mesh URL (from Quick Scan or API response) - legacy support
+  void setCurrentMeshUrl(String? meshUrl) {
+    _currentMeshUrl = meshUrl;
+    notifyListeners();
+  }
+
+  /// Clear current mesh
+  void clearCurrentMesh() {
+    _currentMeshUrl = null;
+    _currentMeshId = null;
+    notifyListeners();
+  }
+
+  /// Get full mesh URL for ModelViewer
+  String? getFullMeshUrl() {
+    if (_currentMeshUrl == null) return null;
+    return _apiService.getFullMeshUrl(_currentMeshUrl!);
   }
 
   /// Send a message
@@ -66,18 +99,20 @@ class ChatProvider with ChangeNotifier {
       ChatResponse response;
       
       if (_selectedImage != null) {
-        // Send with image
+        // Send with image - include mesh_id if we have one
         response = await _apiService.sendMessageWithImage(
           message: content,
           imageFile: _selectedImage!,
           conversationId: _currentConversation!.id,
+          meshId: _currentMeshId,  // Pass mesh_id for editing
         );
         _selectedImage = null; // Clear after sending
       } else {
-        // Send text only
+        // Send text only - include mesh_id if we have one
         response = await _apiService.sendMessage(
           message: content,
           conversationId: _currentConversation!.id,
+          meshId: _currentMeshId,  // Pass mesh_id for editing
         );
       }
 
@@ -96,6 +131,14 @@ class ChatProvider with ChangeNotifier {
         id: response.conversationId,
         messages: [...messagesWithoutLoading, assistantMessage],
       );
+
+      // Update mesh info if returned from API (mesh was regenerated/updated)
+      if (response.meshUrl != null) {
+        _currentMeshUrl = response.meshUrl;
+      }
+      if (response.meshId != null) {
+        _currentMeshId = response.meshId;
+      }
 
     } catch (e) {
       // Remove loading message on error

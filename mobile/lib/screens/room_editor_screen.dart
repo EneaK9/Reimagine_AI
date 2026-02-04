@@ -1,3 +1,14 @@
+// =============================================================================
+// UNITY ROOM EDITOR - COMMENTED OUT
+// =============================================================================
+// This file contains the Unity-based room editor which requires Unity module
+// integration. It has been disabled in favor of the new photo-to-3D approach
+// using depth estimation.
+//
+// To re-enable Unity integration in the future, uncomment the code below.
+// =============================================================================
+
+/*
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../models/room_model.dart';
@@ -104,7 +115,7 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
     final colors = ['red', 'blue', 'green', 'white', 'black', 'navy', 'beige', 'cream', 'gray', 'grey'];
     for (final color in colors) {
       if (messageLower.contains(color) && target != null) {
-        return "I would change the $target to $color. (Unity integration required to apply changes)";
+        return "I would change the \$target to \$color. (Unity integration required to apply changes)";
       }
     }
     
@@ -112,12 +123,12 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
     final materials = ['wood', 'hardwood', 'marble', 'stone', 'metal', 'glass'];
     for (final material in materials) {
       if (messageLower.contains(material) && target != null) {
-        return "I would apply a $material finish to the $target. (Unity integration required to apply changes)";
+        return "I would apply a \$material finish to the \$target. (Unity integration required to apply changes)";
       }
     }
     
     if (target != null) {
-      return "I understand you want to modify the $target. What color or material would you like?";
+      return "I understand you want to modify the \$target. What color or material would you like?";
     }
     
     return "I can help you change colors and materials. Try something like 'Make the walls navy blue' or 'Change the floor to hardwood'.";
@@ -182,7 +193,7 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Room ID: ${widget.roomId}',
+                  'Room ID: \${widget.roomId}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: AppTheme.textMuted,
                   ),
@@ -373,3 +384,4 @@ class ChatMessage {
     required this.timestamp,
   });
 }
+*/

@@ -15,6 +15,7 @@ from ..models.schemas import (
 from ..services.openai_service import openai_service
 from ..services.conversation_service import conversation_service
 from ..services.gemini_service import gemini_service
+from ..services.depth_service import depth_service
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -24,13 +25,18 @@ async def send_message(request: ChatRequest):
     """
     Send a message to the AI assistant.
     Optionally include an image (base64 encoded) for room analysis.
-    Supports follow-up edits on previously generated images.
+    Supports follow-up edits on previously generated images and 3D meshes.
     """
     try:
         # Get or create conversation
         conversation = conversation_service.get_or_create_conversation(
             request.conversation_id
         )
+        
+        # If mesh_id is provided, store it in the conversation for mesh editing
+        if request.mesh_id:
+            print(f"[Chat] Mesh ID provided: {request.mesh_id} - enabling mesh editing mode")
+            conversation_service.store_mesh_reference(conversation.id, request.mesh_id)
         
         # Determine which image to use for editing
         image_to_edit = None
@@ -103,6 +109,9 @@ async def send_message(request: ChatRequest):
         )
         
         # THEN attach images to the assistant message we just added
+        mesh_url = None
+        mesh_id = None
+        
         if generated_images:
             # Extract base64 from data URL for storage
             last_img = generated_images[0]
@@ -116,6 +125,29 @@ async def send_message(request: ChatRequest):
                 generated_images,
                 last_image_base64=last_img_base64
             )
+            
+            # Check if conversation has an associated mesh - regenerate it
+            if conversation_service.has_mesh(conversation.id):
+                try:
+                    print(f"[Chat] Regenerating mesh for conversation {conversation.id}")
+                    mesh_result = await depth_service.generate_mesh_from_image(last_img_base64)
+                    mesh_id = mesh_result["mesh_id"]
+                    
+                    # Update mesh reference in conversation
+                    conversation_service.store_mesh_reference(conversation.id, mesh_id)
+                    mesh_url = f"/api/v1/depth/mesh/{mesh_id}"
+                    print(f"[Chat] Mesh regenerated: {mesh_url}")
+                except Exception as mesh_error:
+                    print(f"[Chat] Mesh regeneration failed: {mesh_error}")
+                    import traceback
+                    traceback.print_exc()
+                    # Don't fail the whole request if mesh regen fails
+        else:
+            # No new images but conversation might still have a mesh - return its info
+            existing_mesh_id = conversation_service.get_mesh_id(conversation.id)
+            if existing_mesh_id:
+                mesh_id = existing_mesh_id
+                mesh_url = f"/api/v1/depth/mesh/{mesh_id}"
         
         # Clean response - remove [IMAGE_PROMPT] section before sending to client
         clean_response = ai_response
@@ -126,7 +158,9 @@ async def send_message(request: ChatRequest):
             conversation_id=conversation.id,
             message=clean_response,
             generated_images=generated_images,
-            furniture_suggestions=[]  # TODO: Implement furniture matching
+            furniture_suggestions=[],  # TODO: Implement furniture matching
+            mesh_url=mesh_url,
+            mesh_id=mesh_id
         )
         
     except Exception as e:
@@ -151,11 +185,13 @@ def _is_edit_request(message: str) -> bool:
 async def send_message_with_image(
     message: str = Form(...),
     conversation_id: Optional[str] = Form(None),
+    mesh_id: Optional[str] = Form(None),
     image: UploadFile = File(...)
 ):
     """
     Send a message with an uploaded image file.
     Alternative to base64 encoding in the request body.
+    Supports mesh_id for 3D mesh editing.
     """
     try:
         # Read and encode image
@@ -166,7 +202,8 @@ async def send_message_with_image(
         request = ChatRequest(
             message=message,
             conversation_id=conversation_id,
-            image_base64=image_base64
+            image_base64=image_base64,
+            mesh_id=mesh_id
         )
         
         return await send_message(request)
