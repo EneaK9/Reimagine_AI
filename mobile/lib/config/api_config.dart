@@ -6,9 +6,9 @@ class ApiConfig {
   // - iOS simulator: http://localhost:8000
   // - Physical device: http://YOUR_COMPUTER_IP:8000
   
-  static const String baseUrl = 'http://localhost:8000'; // Windows desktop / Web
+  // static const String baseUrl = 'http://localhost:8000'; // Windows desktop / Web
   // static const String baseUrl = 'http://10.0.2.2:8000'; // Android emulator
-  // static const String baseUrl = 'http://192.168.1.X:8000'; // Physical device
+  static const String baseUrl = 'http://192.168.0.92:8000'; // Physical device (your computer's IP)
   
   static const String apiVersion = '/api/v1';
   

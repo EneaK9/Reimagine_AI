@@ -20,6 +20,7 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  final GlobalKey<ChatInputState> _chatInputKey = GlobalKey<ChatInputState>();
 
   @override
   void initState() {
@@ -359,7 +360,7 @@ class _ChatScreenState extends State<ChatScreen> {
         // Photo upload option
         GestureDetector(
           onTap: () {
-            // Trigger image picker from ChatInput
+            _chatInputKey.currentState?.showImageSourcePicker();
           },
           child: Container(
             width: double.infinity,
@@ -618,6 +619,7 @@ class _ChatScreenState extends State<ChatScreen> {
         }
 
         return ChatInput(
+          key: _chatInputKey,
           onSend: (message) => provider.sendMessage(message),
           onImageSelected: (image) => provider.setSelectedImage(image),
           selectedImage: provider.selectedImage,

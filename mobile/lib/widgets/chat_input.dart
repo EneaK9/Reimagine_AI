@@ -22,10 +22,10 @@ class ChatInput extends StatefulWidget {
   });
 
   @override
-  State<ChatInput> createState() => _ChatInputState();
+  State<ChatInput> createState() => ChatInputState();
 }
 
-class _ChatInputState extends State<ChatInput> {
+class ChatInputState extends State<ChatInput> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
   final ImagePicker _picker = ImagePicker();
@@ -76,7 +76,7 @@ class _ChatInputState extends State<ChatInput> {
     }
   }
 
-  void _showImageSourcePicker() {
+  void showImageSourcePicker() {
     showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.surface,
@@ -296,7 +296,7 @@ class _ChatInputState extends State<ChatInput> {
             children: [
               // Attachment Button
               GestureDetector(
-                onTap: widget.isLoading ? null : _showImageSourcePicker,
+                onTap: widget.isLoading ? null : showImageSourcePicker,
                 child: Container(
                   width: 48,
                   height: 48,

@@ -5,8 +5,8 @@ m_ProjectFiles:
     m_ContentTrackingEnabled: 1
     m_ModificationDate:
       serializedVersion: 2
-      ticks: 639052138002684659
-    m_Hash: 3766034282
+      ticks: 639054622453086367
+    m_Hash: 2969014035
   m_LockFileStatus:
     m_FilePath: D:/Projects/Reimagine_AI/Reimagine_AI/unity_ar_scanner/Packages/packages-lock.json
     m_PathExists: 1
@@ -2242,6 +2242,7 @@ m_ResolvedPackages:
     - 5.1.5
     - 5.1.6
     - 5.2.0
+    - 5.2.2
     - 6.0.0-pre.3
     - 6.0.0-pre.4
     - 6.0.0-pre.5
@@ -2275,11 +2276,13 @@ m_ResolvedPackages:
     - 6.4.0-pre.1
     - 6.4.0
     - 6.4.1
+    - 6.5.0-pre.1
     compatible:
     - 6.3.2
     - 6.4.0-pre.1
     - 6.4.0
     - 6.4.1
+    - 6.5.0-pre.1
     recommended: 6.3.2
     deprecated: []
   dependencies:
@@ -2544,6 +2547,7 @@ m_ResolvedPackages:
     - 5.1.5
     - 5.1.6
     - 5.2.0
+    - 5.2.2
     - 6.0.0-pre.3
     - 6.0.0-pre.4
     - 6.0.0-pre.5
@@ -2577,11 +2581,13 @@ m_ResolvedPackages:
     - 6.4.0-pre.1
     - 6.4.0
     - 6.4.1
+    - 6.5.0-pre.1
     compatible:
     - 6.3.2
     - 6.4.0-pre.1
     - 6.4.0
     - 6.4.1
+    - 6.5.0-pre.1
     recommended: 6.3.2
     deprecated: []
   dependencies:
@@ -2888,6 +2894,7 @@ m_ResolvedPackages:
     - 5.1.5
     - 5.1.6
     - 5.2.0
+    - 5.2.2
     - 6.0.0-pre.3
     - 6.0.0-pre.4
     - 6.0.0-pre.5
@@ -2921,11 +2928,13 @@ m_ResolvedPackages:
     - 6.4.0-pre.1
     - 6.4.0
     - 6.4.1
+    - 6.5.0-pre.1
     compatible:
     - 6.3.2
     - 6.4.0-pre.1
     - 6.4.0
     - 6.4.1
+    - 6.5.0-pre.1
     recommended: 6.3.2
     deprecated: []
   dependencies:
