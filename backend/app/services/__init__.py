@@ -1,4 +1,4 @@
 # ReimagineAI Services
-from .openai_service import openai_service
-from .conversation_service import conversation_service
-from .gemini_service import gemini_service
+#
+# Keep this package initializer lightweight. Import concrete services from their
+# modules directly so scripts can use one service without loading every AI SDK.

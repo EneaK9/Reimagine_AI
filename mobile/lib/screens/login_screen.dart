@@ -228,11 +228,12 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget _buildLoginButton() {
     return Consumer<AuthProvider>(
       builder: (context, auth, child) {
-        if (auth.error != null) {
+        final errorMessage = auth.error;
+        if (errorMessage != null && errorMessage.isNotEmpty) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text(auth.error!),
+                content: Text(errorMessage),
                 backgroundColor: AppTheme.error,
                 behavior: SnackBarBehavior.floating,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

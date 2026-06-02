@@ -218,6 +218,57 @@ class MeshInfo(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+# ============ Product Search Schemas ============
+
+class StoreName(str, Enum):
+    AMAZON = "amazon"
+    TARGET = "target"
+    EBAY = "ebay"
+    IKEA = "ikea"
+
+
+class ProductSearchRequest(BaseModel):
+    description: str = Field(..., min_length=2)
+    stores: List[StoreName] = Field(
+        default_factory=lambda: [
+            StoreName.AMAZON,
+            StoreName.TARGET,
+            StoreName.EBAY,
+            StoreName.IKEA,
+        ]
+    )
+    limit_per_store: int = Field(default=5, ge=1, le=10)
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "description": "Tall yellow vase under $150",
+                "stores": ["amazon", "target", "ebay", "ikea"],
+                "limit_per_store": 5
+            }
+        }
+
+
+class ProductResult(BaseModel):
+    store: StoreName
+    title: str
+    link: str
+    description: Optional[str] = None
+    price: Optional[float] = None
+    currency: str = "USD"
+    image: Optional[str] = None
+    rating: Optional[float] = None
+    reviews: Optional[int] = None
+    source: str = "serpapi"
+    score: float = 0
+
+
+class ProductSearchResponse(BaseModel):
+    query: str
+    results: List[ProductResult] = Field(default_factory=list)
+    errors: List[str] = Field(default_factory=list)
+
+
 # ============ Health Check ============
 
 class HealthCheck(BaseModel):

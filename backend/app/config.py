@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     
     # API Keys
     openai_api_key: str = ""
+    serp_api_key: str = ""
     
     # Database
     database_url: str = "postgresql+asyncpg://user:password@localhost:5432/reimagine_ai"

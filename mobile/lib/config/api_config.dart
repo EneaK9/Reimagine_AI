@@ -1,7 +1,29 @@
+import 'package:flutter/foundation.dart';
+
 /// API Configuration for ReimagineAI
 class ApiConfig {
-  // Your computer's IP - change this if your IP changes
-  static const String baseUrl = 'http://192.168.0.252:8000';
+  static const String _configuredBaseUrl = String.fromEnvironment('API_BASE_URL');
+  static const String physicalDeviceBaseUrl = 'http://192.168.0.252:8000';
+
+  static String get baseUrl {
+    if (_configuredBaseUrl.isNotEmpty) {
+      return _configuredBaseUrl;
+    }
+
+    if (kIsWeb) {
+      return 'http://127.0.0.1:8000';
+    }
+
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.android => 'http://10.0.2.2:8000',
+      TargetPlatform.iOS ||
+      TargetPlatform.macOS ||
+      TargetPlatform.linux ||
+      TargetPlatform.windows ||
+      TargetPlatform.fuchsia =>
+        'http://127.0.0.1:8000',
+    };
+  }
   
   static const String apiVersion = '/api/v1';
   

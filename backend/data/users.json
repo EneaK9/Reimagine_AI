@@ -8,5 +8,25 @@
     "token": "jFW879Rq8eGMaxHvR04fM9DeJE5w7y6G_yrOspggOGw",
     "created_at": "2026-02-01T15:15:26.185464",
     "updated_at": "2026-02-04T14:34:08.043860"
+  },
+  "user_899018a8c2dc": {
+    "id": "user_899018a8c2dc",
+    "username": "irvi",
+    "email": "irvi@shfa.ai",
+    "password_hash": "4d1c33dd83c85d4cc71fa4e93bee27786805151d600a0244a7fe8f17c4539df5",
+    "salt": "a04ff66bb88d807df6e65f30d64e8095",
+    "token": "xIoLYWj6guO7sYoZX9f7SZCe_BU-ZalEPVuFT7RbkmE",
+    "created_at": "2026-06-02T14:06:45.247511",
+    "updated_at": "2026-06-02T14:32:33.119531"
+  },
+  "user_ac8fac8ae9be": {
+    "id": "user_ac8fac8ae9be",
+    "username": "Irvi1",
+    "email": "irvi@shfa.io",
+    "password_hash": "e38752bb24fae9da027d25657a37c90e9eb2ba67f906334d6d6cee28628670db",
+    "salt": "1470f094a30472fb2ccdecca14e140c9",
+    "token": "8rAbXfd54JiJG1WBqkkbZaJYOcq2yrq2GZURPsJ7UKw",
+    "created_at": "2026-06-02T14:44:17.306416",
+    "updated_at": "2026-06-02T14:44:17.306428"
   }
 }

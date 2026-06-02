@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 from .config import get_settings
-from .routers import chat, images, auth, rooms, depth
+from .routers import chat, images, auth, rooms, depth, products
 from .models.schemas import HealthCheck
 
 settings = get_settings()
@@ -28,6 +28,11 @@ async def lifespan(app: FastAPI):
         print("[WARNING] OpenAI API key not set! Set OPENAI_API_KEY in .env")
     else:
         print("[OK] OpenAI API key configured")
+    
+    if not settings.serp_api_key:
+        print("[WARNING] SerpApi key not set! Set SERP_API_KEY in .env")
+    else:
+        print("[OK] SerpApi key configured")
     
     yield
     
@@ -77,6 +82,7 @@ app.include_router(chat.router, prefix="/api/v1")
 app.include_router(images.router, prefix="/api/v1")
 app.include_router(rooms.router, prefix="/api/v1")
 app.include_router(depth.router, prefix="/api/v1")
+app.include_router(products.router, prefix="/api/v1")
 
 
 # ============ Root Endpoints ============

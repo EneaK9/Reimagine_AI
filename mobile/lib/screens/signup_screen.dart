@@ -311,11 +311,12 @@ class _SignupScreenState extends State<SignupScreen> {
     return Consumer<AuthProvider>(
       builder: (context, auth, child) {
         // Show error if any
-        if (auth.error != null) {
+        final errorMessage = auth.error;
+        if (errorMessage != null && errorMessage.isNotEmpty) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text(auth.error!),
+                content: Text(errorMessage),
                 backgroundColor: Colors.red,
               ),
             );
