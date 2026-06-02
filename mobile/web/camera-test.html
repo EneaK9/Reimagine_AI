@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Camera Test</title>
+  <style>
+    body {
+      background: #111;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 24px;
+    }
+
+    button {
+      background: #7c5cff;
+      border: 0;
+      border-radius: 12px;
+      color: #fff;
+      font-size: 16px;
+      font-weight: 700;
+      padding: 14px 18px;
+    }
+
+    video {
+      background: #000;
+      border-radius: 16px;
+      display: block;
+      margin-top: 20px;
+      max-height: 60vh;
+      width: 100%;
+    }
+
+    pre {
+      background: #222;
+      border-radius: 12px;
+      color: #d7d7d7;
+      overflow: auto;
+      padding: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <h1>Camera Test</h1>
+  <p>This page bypasses Flutter and asks the browser for camera access directly.</p>
+  <button id="start">Allow Camera</button>
+  <video id="video" autoplay muted playsinline></video>
+  <h2>Diagnostics</h2>
+  <pre id="log">Waiting...</pre>
+
+  <script>
+    const logEl = document.getElementById('log');
+    const videoEl = document.getElementById('video');
+    const startBtn = document.getElementById('start');
+
+    function writeLog(lines) {
+      logEl.textContent = lines.join('\n');
+    }
+
+    async function permissionState() {
+      try {
+        if (!navigator.permissions) return 'Permissions API unavailable';
+        const status = await navigator.permissions.query({ name: 'camera' });
+        return status.state;
+      } catch (error) {
+        return `Permissions API error: ${error.name || error}`;
+      }
+    }
+
+    async function diagnostics(error) {
+      const lines = [
+        `URL: ${location.href}`,
+        `Origin: ${location.origin}`,
+        `Protocol: ${location.protocol}`,
+        `Secure context: ${window.isSecureContext}`,
+        `Top-level window: ${window.top === window}`,
+        `mediaDevices available: ${!!navigator.mediaDevices}`,
+        `getUserMedia available: ${!!navigator.mediaDevices?.getUserMedia}`,
+        `Permissions camera state: ${await permissionState()}`,
+        `User agent: ${navigator.userAgent}`,
+      ];
+
+      if (document.permissionsPolicy?.allowsFeature) {
+        lines.push(`Permissions Policy allows camera: ${document.permissionsPolicy.allowsFeature('camera')}`);
+      } else if (document.featurePolicy?.allowsFeature) {
+        lines.push(`Feature Policy allows camera: ${document.featurePolicy.allowsFeature('camera')}`);
+      }
+
+      if (error) {
+        lines.push(`Error name: ${error.name}`);
+        lines.push(`Error message: ${error.message}`);
+        lines.push(`Error text: ${error}`);
+      }
+
+      writeLog(lines);
+    }
+
+    startBtn.addEventListener('click', async () => {
+      await diagnostics();
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+        videoEl.srcObject = stream;
+        await videoEl.play();
+        await diagnostics();
+        logEl.textContent += '\nCamera started successfully.';
+      } catch (error) {
+        await diagnostics(error);
+      }
+    });
+
+    diagnostics();
+  </script>
+</body>
+</html>

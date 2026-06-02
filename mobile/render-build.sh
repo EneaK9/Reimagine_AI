@@ -14,3 +14,5 @@ flutter pub get
 flutter build web --release \
   --dart-define=API_BASE_URL="${API_BASE_URL:?API_BASE_URL must be set to your HTTPS backend URL}" \
   --dart-define=CAMERA_REDIRECT_URL="${CAMERA_REDIRECT_URL:-}"
+
+cp web/camera-test.html build/web/camera-test.html

@@ -14,5 +14,9 @@ class WebCameraCaptureController {
 
   Future<void> playPreview() async {}
 
+  Future<String> diagnosticsForError(Object error) async {
+    return error.toString();
+  }
+
   void dispose() {}
 }

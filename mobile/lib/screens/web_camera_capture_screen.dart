@@ -19,6 +19,7 @@ class _WebCameraCaptureScreenState extends State<WebCameraCaptureScreen> {
   bool _isCapturing = false;
   bool _isCameraReady = false;
   String? _error;
+  String? _diagnostics;
 
   @override
   void dispose() {
@@ -30,6 +31,7 @@ class _WebCameraCaptureScreenState extends State<WebCameraCaptureScreen> {
     setState(() {
       _isStarting = true;
       _error = null;
+      _diagnostics = null;
     });
 
     try {
@@ -44,9 +46,12 @@ class _WebCameraCaptureScreenState extends State<WebCameraCaptureScreen> {
       });
     } catch (e) {
       if (!mounted) return;
+      final diagnostics = await _camera.diagnosticsForError(e);
+      if (!mounted) return;
       setState(() {
         _isStarting = false;
         _error = _cameraErrorMessage(e);
+        _diagnostics = diagnostics;
       });
     }
   }
@@ -55,6 +60,7 @@ class _WebCameraCaptureScreenState extends State<WebCameraCaptureScreen> {
     setState(() {
       _isCapturing = true;
       _error = null;
+      _diagnostics = null;
     });
 
     try {
@@ -63,9 +69,12 @@ class _WebCameraCaptureScreenState extends State<WebCameraCaptureScreen> {
       Navigator.pop(context, image);
     } catch (e) {
       if (!mounted) return;
+      final diagnostics = await _camera.diagnosticsForError(e);
+      if (!mounted) return;
       setState(() {
         _isCapturing = false;
         _error = 'Could not capture photo: $e';
+        _diagnostics = diagnostics;
       });
     }
   }
@@ -190,6 +199,10 @@ class _WebCameraCaptureScreenState extends State<WebCameraCaptureScreen> {
                   ),
                 ),
               ),
+              if (_diagnostics != null) ...[
+                const SizedBox(height: 12),
+                _buildDiagnosticsBox(),
+              ],
             ],
             const SizedBox(height: 28),
             ElevatedButton.icon(
@@ -242,6 +255,11 @@ class _WebCameraCaptureScreenState extends State<WebCameraCaptureScreen> {
               style: GoogleFonts.dmSans(color: AppTheme.error),
             ),
           ),
+        if (_diagnostics != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: _buildDiagnosticsBox(),
+          ),
         Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
@@ -286,6 +304,25 @@ class _WebCameraCaptureScreenState extends State<WebCameraCaptureScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildDiagnosticsBox() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.inputBackground,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: SelectableText(
+        _diagnostics!,
+        style: GoogleFonts.dmMono(
+          fontSize: 11,
+          color: AppTheme.textSecondary,
+        ),
+      ),
     );
   }
 }

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:html' as html;
+import 'dart:js_util' as js_util;
 import 'dart:typed_data';
 import 'dart:ui_web' as ui_web;
 
@@ -48,6 +49,34 @@ class WebCameraCaptureController {
     }
   }
 
+  Future<String> diagnosticsForError(Object error) async {
+    final lines = <String>[
+      'Error type: ${error.runtimeType}',
+      'Error text: $error',
+      'DOM name: ${_safeJsString(error, 'name')}',
+      'DOM message: ${_safeJsString(error, 'message')}',
+      'URL: ${html.window.location.href}',
+      'Origin: ${html.window.location.origin}',
+      'Protocol: ${html.window.location.protocol}',
+      'Secure context: ${_safeWindowProperty('isSecureContext')}',
+      'Top-level window: ${_isTopLevelWindow()}',
+      'mediaDevices available: ${html.window.navigator.mediaDevices != null}',
+      'User agent: ${html.window.navigator.userAgent}',
+    ];
+
+    final cameraPermission = await _cameraPermissionState();
+    if (cameraPermission != null) {
+      lines.add('Permissions API camera state: $cameraPermission');
+    }
+
+    final policyCamera = _permissionsPolicyAllowsCamera();
+    if (policyCamera != null) {
+      lines.add('Permissions Policy allows camera: $policyCamera');
+    }
+
+    return lines.join('\n');
+  }
+
   Future<html.MediaStream> _getCameraStream(html.MediaDevices mediaDevices) async {
     try {
       return await mediaDevices.getUserMedia({
@@ -67,6 +96,69 @@ class WebCameraCaptureController {
         'video': true,
       });
     }
+  }
+
+  String _safeJsString(Object target, String property) {
+    try {
+      final value = js_util.getProperty<Object?>(target, property);
+      return value?.toString() ?? 'unavailable';
+    } catch (_) {
+      return 'unavailable';
+    }
+  }
+
+  String _safeWindowProperty(String property) {
+    try {
+      final value = js_util.getProperty<Object?>(html.window, property);
+      return value?.toString() ?? 'unavailable';
+    } catch (_) {
+      return 'unavailable';
+    }
+  }
+
+  bool _isTopLevelWindow() {
+    try {
+      return identical(html.window, html.window.top);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<String?> _cameraPermissionState() async {
+    try {
+      final permissions = js_util.getProperty<Object?>(html.window.navigator, 'permissions');
+      if (permissions == null) return null;
+
+      final promise = js_util.callMethod<Object>(permissions, 'query', [
+        js_util.jsify({'name': 'camera'}),
+      ]);
+      final status = await js_util.promiseToFuture<Object>(promise);
+      return _safeJsString(status, 'state');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool? _permissionsPolicyAllowsCamera() {
+    try {
+      final document = html.document;
+      final policy = js_util.getProperty<Object?>(
+        document,
+        'permissionsPolicy',
+      ) ?? js_util.getProperty<Object?>(document, 'featurePolicy');
+      if (policy == null) return null;
+
+      if (js_util.hasProperty(policy, 'allowsFeature')) {
+        return js_util.callMethod<bool>(policy, 'allowsFeature', ['camera']);
+      }
+      if (js_util.hasProperty(policy, 'allowedFeatures')) {
+        final features = js_util.callMethod<Object>(policy, 'allowedFeatures', []);
+        return js_util.callMethod<bool>(features, 'includes', ['camera']);
+      }
+    } catch (_) {
+      return null;
+    }
+    return null;
   }
 
   Future<XFile> capture() async {
