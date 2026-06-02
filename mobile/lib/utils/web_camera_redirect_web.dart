@@ -1,6 +1,11 @@
 import 'dart:html' as html;
 
 bool redirectToCameraPlaybackFixUrl() {
-  html.window.location.href = 'https://fuzzy-laws-smash.loca.lt/?v=camera-playback-fix';
+  const redirectUrl = String.fromEnvironment('CAMERA_REDIRECT_URL');
+  if (redirectUrl.isEmpty) {
+    return false;
+  }
+
+  html.window.location.href = redirectUrl;
   return true;
 }
