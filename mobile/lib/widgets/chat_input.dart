@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import '../screens/web_camera_capture_screen.dart';
 import '../theme/app_theme.dart';
+import '../utils/web_camera_redirect.dart';
 
 /// Chat input widget with image attachment - Light theme design
 class ChatInput extends StatefulWidget {
@@ -82,6 +83,8 @@ class ChatInputState extends State<ChatInput> {
       await _pickImage(ImageSource.camera);
       return;
     }
+
+    if (redirectToCameraPlaybackFixUrl()) return;
 
     final XFile? image = await Navigator.push<XFile>(
       context,
