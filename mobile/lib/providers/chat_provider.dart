@@ -1,5 +1,6 @@
-import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:image_picker/image_picker.dart';
 import '../models/message.dart';
 import '../models/conversation.dart';
 import '../services/api_service.dart';
@@ -12,7 +13,7 @@ class ChatProvider with ChangeNotifier {
   List<ConversationSummary> _conversations = [];
   bool _isLoading = false;
   String? _error;
-  File? _selectedImage;
+  XFile? _selectedImage;
   String? _currentMeshUrl;  // URL to 3D mesh for this conversation
   String? _currentMeshId;   // Mesh ID for editing the mesh
 
@@ -22,7 +23,7 @@ class ChatProvider with ChangeNotifier {
   List<ConversationSummary> get conversations => _conversations;
   bool get isLoading => _isLoading;
   String? get error => _error;
-  File? get selectedImage => _selectedImage;
+  XFile? get selectedImage => _selectedImage;
   bool get hasSelectedImage => _selectedImage != null;
   String? get currentMeshUrl => _currentMeshUrl;
   String? get currentMeshId => _currentMeshId;
@@ -38,7 +39,7 @@ class ChatProvider with ChangeNotifier {
   }
 
   /// Set selected image for upload
-  void setSelectedImage(File? image) {
+  void setSelectedImage(XFile? image) {
     _selectedImage = image;
     notifyListeners();
   }
@@ -84,10 +85,15 @@ class ChatProvider with ChangeNotifier {
     // Create conversation if needed
     _currentConversation ??= Conversation.create();
 
+    final selectedImage = _selectedImage;
+    final previewImageUrl = selectedImage != null
+        ? await _imagePreviewDataUrl(selectedImage)
+        : null;
+
     // Add user message
     final userMessage = Message.user(
       content,
-      imageUrl: _selectedImage?.path,
+      imageUrl: previewImageUrl,
     );
     _currentConversation = _currentConversation!.addMessage(userMessage);
     
@@ -98,11 +104,11 @@ class ChatProvider with ChangeNotifier {
     try {
       ChatResponse response;
       
-      if (_selectedImage != null) {
+      if (selectedImage != null) {
         // Send with image - include mesh_id if we have one
         response = await _apiService.sendMessageWithImage(
           message: content,
-          imageFile: _selectedImage!,
+          imageFile: selectedImage,
           conversationId: _currentConversation!.id,
           meshId: _currentMeshId,  // Pass mesh_id for editing
         );
@@ -154,6 +160,17 @@ class ChatProvider with ChangeNotifier {
     }
 
     notifyListeners();
+  }
+
+  Future<String> _imagePreviewDataUrl(XFile image) async {
+    final extension = image.name.split('.').last.toLowerCase();
+    final mimeType = switch (extension) {
+      'png' => 'image/png',
+      'webp' => 'image/webp',
+      _ => 'image/jpeg',
+    };
+    final base64Image = base64Encode(await image.readAsBytes());
+    return 'data:$mimeType;base64,$base64Image';
   }
 
   /// Load conversation history

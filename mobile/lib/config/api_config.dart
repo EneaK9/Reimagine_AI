@@ -1,7 +1,11 @@
 /// API Configuration for ReimagineAI
 class ApiConfig {
-  // Your computer's IP - change this if your IP changes
-  static const String baseUrl = 'http://192.168.0.252:8000';
+  // Override this for web builds with:
+  // --dart-define=API_BASE_URL=https://your-backend-tunnel
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'http://192.168.0.252:8000',
+  );
   
   static const String apiVersion = '/api/v1';
   

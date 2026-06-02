@@ -1,14 +1,15 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import '../screens/web_camera_capture_screen.dart';
 import '../theme/app_theme.dart';
 
 /// Chat input widget with image attachment - Light theme design
 class ChatInput extends StatefulWidget {
   final Function(String message) onSend;
-  final Function(File image) onImageSelected;
-  final File? selectedImage;
+  final Function(XFile image) onImageSelected;
+  final XFile? selectedImage;
   final VoidCallback? onClearImage;
   final bool isLoading;
 
@@ -58,7 +59,7 @@ class ChatInputState extends State<ChatInput> {
       );
       
       if (image != null) {
-        widget.onImageSelected(File(image.path));
+        widget.onImageSelected(image);
       }
     } catch (e) {
       if (mounted) {
@@ -73,6 +74,22 @@ class ChatInputState extends State<ChatInput> {
           ),
         );
       }
+    }
+  }
+
+  Future<void> _pickCameraImage() async {
+    if (!kIsWeb) {
+      await _pickImage(ImageSource.camera);
+      return;
+    }
+
+    final XFile? image = await Navigator.push<XFile>(
+      context,
+      MaterialPageRoute(builder: (_) => const WebCameraCaptureScreen()),
+    );
+
+    if (image != null) {
+      widget.onImageSelected(image);
     }
   }
 
@@ -125,17 +142,17 @@ class ChatInputState extends State<ChatInput> {
                   _buildImageSourceOption(
                     icon: Icons.camera_alt_rounded,
                     label: 'Camera',
-                    onTap: () {
-                      Navigator.pop(context);
-                      _pickImage(ImageSource.camera);
+                    onTap: () async {
+                      if (context.mounted) Navigator.pop(context);
+                      await _pickCameraImage();
                     },
                   ),
                   _buildImageSourceOption(
                     icon: Icons.photo_library_rounded,
                     label: 'Gallery',
-                    onTap: () {
-                      Navigator.pop(context);
-                      _pickImage(ImageSource.gallery);
+                    onTap: () async {
+                      await _pickImage(ImageSource.gallery);
+                      if (context.mounted) Navigator.pop(context);
                     },
                   ),
                 ],
@@ -234,11 +251,31 @@ class ChatInputState extends State<ChatInput> {
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(10),
-                      child: Image.file(
-                        widget.selectedImage!,
-                        height: 72,
-                        width: 72,
-                        fit: BoxFit.cover,
+                      child: FutureBuilder(
+                        future: widget.selectedImage!.readAsBytes(),
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
+                            return Container(
+                              height: 72,
+                              width: 72,
+                              color: AppTheme.inputBackground,
+                              child: const Center(
+                                child: SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              ),
+                            );
+                          }
+
+                          return Image.memory(
+                            snapshot.data!,
+                            height: 72,
+                            width: 72,
+                            fit: BoxFit.cover,
+                          );
+                        },
                       ),
                     ),
                   ),

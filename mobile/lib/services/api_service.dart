@@ -1,5 +1,5 @@
-import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:image_picker/image_picker.dart';
 import '../config/api_config.dart';
 
 /// API Service for communicating with the backend (Singleton)
@@ -116,7 +116,7 @@ class ApiService {
   /// Send a chat message with an image file
   Future<ChatResponse> sendMessageWithImage({
     required String message,
-    required File imageFile,
+    required XFile imageFile,
     String? conversationId,
     String? meshId,  // Pass mesh_id so backend can edit the mesh
   }) async {
@@ -125,10 +125,7 @@ class ApiService {
         'message': message,
         'conversation_id': conversationId,
         if (meshId != null) 'mesh_id': meshId,
-        'image': await MultipartFile.fromFile(
-          imageFile.path,
-          filename: imageFile.path.split('/').last,
-        ),
+        'image': await _multipartFromXFile(imageFile),
       });
 
       final response = await _dio.post(
@@ -199,13 +196,10 @@ class ApiService {
   }
 
   /// Analyze a room image
-  Future<Map<String, dynamic>> analyzeRoom(File imageFile) async {
+  Future<Map<String, dynamic>> analyzeRoom(XFile imageFile) async {
     try {
       final formData = FormData.fromMap({
-        'image': await MultipartFile.fromFile(
-          imageFile.path,
-          filename: imageFile.path.split('/').last,
-        ),
+        'image': await _multipartFromXFile(imageFile),
       });
 
       final response = await _dio.post(
@@ -235,13 +229,10 @@ class ApiService {
   // ============ Depth/3D Mesh Methods ============
 
   /// Generate a 3D mesh from a room photo using depth estimation
-  Future<Map<String, dynamic>> generateMeshFromPhoto(File imageFile) async {
+  Future<Map<String, dynamic>> generateMeshFromPhoto(XFile imageFile) async {
     try {
       final formData = FormData.fromMap({
-        'image': await MultipartFile.fromFile(
-          imageFile.path,
-          filename: imageFile.path.split('/').last,
-        ),
+        'image': await _multipartFromXFile(imageFile),
       });
 
       final response = await _dio.post(
@@ -258,6 +249,13 @@ class ApiService {
     } on DioException catch (e) {
       throw _handleError(e);
     }
+  }
+
+  Future<MultipartFile> _multipartFromXFile(XFile imageFile) async {
+    return MultipartFile.fromBytes(
+      await imageFile.readAsBytes(),
+      filename: imageFile.name.isNotEmpty ? imageFile.name : 'room-photo.jpg',
+    );
   }
 
   /// Generate a 3D mesh from a base64 encoded image

@@ -8,5 +8,15 @@
     "token": "jFW879Rq8eGMaxHvR04fM9DeJE5w7y6G_yrOspggOGw",
     "created_at": "2026-02-01T15:15:26.185464",
     "updated_at": "2026-02-04T14:34:08.043860"
+  },
+  "user_4c72305080aa": {
+    "id": "user_4c72305080aa",
+    "username": "Irvi2",
+    "email": "irvi2@shfa.ao",
+    "password_hash": "f8bca40bc33f6e058e794a19425afd0ac9ce901836936e87b38445f45d0c61cb",
+    "salt": "d779226feed0e4b59fa7bfe6b54d5792",
+    "token": "_7uXCEwDYaRwcxtCJxbp8BwgRYSairbPu5lqh0uqZcQ",
+    "created_at": "2026-06-02T14:59:47.254773",
+    "updated_at": "2026-06-02T15:14:41.785772"
   }
 }

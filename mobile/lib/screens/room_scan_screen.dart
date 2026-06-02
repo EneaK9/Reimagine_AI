@@ -1,5 +1,5 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
@@ -8,6 +8,7 @@ import '../theme/app_theme.dart';
 import '../services/api_service.dart';
 import '../providers/chat_provider.dart';
 import 'chat_screen.dart';
+import 'web_camera_capture_screen.dart';
 
 /// Quick Scan Screen - Photo to 3D using depth estimation
 /// Replaces the Unity-based AR scanning with a simpler photo-based approach
@@ -23,7 +24,7 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
   final ApiService _apiService = ApiService();
   
   // State
-  File? _capturedImage;
+  XFile? _capturedImage;
   String? _meshUrl;
   String? _meshId;
   String? _depthMapUrl;
@@ -33,37 +34,31 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
   // Generation progress
   String _progressMessage = '';
 
-  @override
-  void initState() {
-    super.initState();
-    // Open camera immediately when screen loads
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _openCamera();
-    });
-  }
-
   Future<void> _openCamera() async {
     try {
-      final XFile? image = await _picker.pickImage(
-        source: ImageSource.camera,
-        maxWidth: 1920,
-        maxHeight: 1920,
-        imageQuality: 85,
-      );
+      final XFile? image = kIsWeb
+          ? await Navigator.push<XFile>(
+              context,
+              MaterialPageRoute(builder: (_) => const WebCameraCaptureScreen()),
+            )
+          : await _picker.pickImage(
+              source: ImageSource.camera,
+              maxWidth: 1920,
+              maxHeight: 1920,
+              imageQuality: 85,
+            );
       
       if (image != null) {
         setState(() {
-          _capturedImage = File(image.path);
+          _capturedImage = image;
           _error = null;
         });
         
         // Automatically start mesh generation
         await _generateMesh();
       } else {
-        // User cancelled camera - go back
-        if (mounted) {
-          Navigator.pop(context);
-        }
+        // User cancelled camera; keep this screen open so they can try again.
+        return;
       }
     } catch (e) {
       setState(() {
@@ -263,7 +258,7 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
           ),
           const SizedBox(height: 24),
           Text(
-            'Opening Camera...',
+            'Ready to Scan',
             style: GoogleFonts.dmSans(
               fontSize: 18,
               fontWeight: FontWeight.w600,
@@ -272,14 +267,62 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Take a photo of your room',
+            'Tap below to open your camera',
             style: GoogleFonts.dmSans(
               fontSize: 14,
               color: AppTheme.textMuted,
             ),
           ),
+          const SizedBox(height: 28),
+          ElevatedButton.icon(
+            onPressed: _openCamera,
+            icon: const Icon(Icons.camera_alt_rounded),
+            label: const Text('Open Camera'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryColor,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _buildCapturedImage({
+    required BoxFit fit,
+    double? width,
+    double? height,
+  }) {
+    final image = _capturedImage;
+    if (image == null) {
+      return const SizedBox.shrink();
+    }
+
+    return FutureBuilder(
+      future: image.readAsBytes(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return Container(
+            width: width,
+            height: height,
+            color: AppTheme.inputBackground,
+            child: const Center(
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          );
+        }
+
+        return Image.memory(
+          snapshot.data!,
+          fit: fit,
+          width: width,
+          height: height,
+        );
+      },
     );
   }
 
@@ -300,8 +343,7 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
               clipBehavior: Clip.antiAlias,
               child: Stack(
                 children: [
-                  Image.file(
-                    _capturedImage!,
+                  _buildCapturedImage(
                     fit: BoxFit.cover,
                     width: 200,
                     height: 200,
@@ -416,10 +458,7 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
               boxShadow: AppTheme.cardShadow,
             ),
             clipBehavior: Clip.antiAlias,
-            child: Image.file(
-              _capturedImage!,
-              fit: BoxFit.contain,
-            ),
+            child: _buildCapturedImage(fit: BoxFit.contain),
           ),
         ),
         Padding(
@@ -550,10 +589,7 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   clipBehavior: Clip.antiAlias,
-                  child: Image.file(
-                    _capturedImage!,
-                    fit: BoxFit.cover,
-                  ),
+                  child: _buildCapturedImage(fit: BoxFit.cover),
                 ),
                 const SizedBox(width: 8),
                 const Icon(Icons.arrow_forward, size: 16, color: Colors.grey),
