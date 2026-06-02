@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html;
+import 'dart:js' as js;
 import 'dart:js_util' as js_util;
 import 'dart:typed_data';
 import 'dart:ui_web' as ui_web;
@@ -14,10 +16,53 @@ class WebCameraCaptureController {
   final String _viewType;
   html.VideoElement? _video;
   html.MediaStream? _stream;
+  Completer<void>? _startCompleter;
 
   Widget buildPreview() => HtmlElementView(viewType: _viewType);
 
-  Future<void> start() async {
+  /// Call this synchronously from a click handler - do NOT await anything before calling.
+  /// Returns a Future that completes when the camera is ready or fails.
+  Future<void> start() {
+    // Create completer to track async result
+    final completer = Completer<void>();
+    _startCompleter = completer;
+
+    // Get mediaDevices synchronously
+    final mediaDevices = html.window.navigator.mediaDevices;
+    if (mediaDevices == null) {
+      completer.completeError(
+        UnsupportedError('This browser does not support camera access.'),
+      );
+      return completer.future;
+    }
+
+    // Call getUserMedia IMMEDIATELY - no awaits before this!
+    // This preserves the user gesture context on mobile browsers.
+    final constraints = js_util.jsify({
+      'audio': false,
+      'video': {
+        'facingMode': {'ideal': 'environment'},
+      },
+    });
+
+    final promise = js_util.callMethod<Object>(
+      mediaDevices,
+      'getUserMedia',
+      [constraints],
+    );
+
+    // Handle the promise result with then/catch to avoid breaking gesture context
+    js_util.promiseToFuture<html.MediaStream>(promise).then((stream) {
+      _onStreamAcquired(stream, completer);
+    }).catchError((error) {
+      // Try fallback without facingMode constraint
+      _tryFallbackStream(mediaDevices, completer, error);
+    });
+
+    return completer.future;
+  }
+
+  void _onStreamAcquired(html.MediaStream stream, Completer<void> completer) {
     final video = html.VideoElement()
       ..autoplay = true
       ..muted = true
@@ -28,16 +73,42 @@ class WebCameraCaptureController {
 
     ui_web.platformViewRegistry.registerViewFactory(_viewType, (_) => video);
 
-    final mediaDevices = html.window.navigator.mediaDevices;
-    if (mediaDevices == null) {
-      throw UnsupportedError('This browser does not support camera access.');
-    }
-
-    final stream = await _getCameraStream(mediaDevices);
-
     _video = video;
     _stream = stream;
     video.srcObject = stream;
+
+    completer.complete();
+  }
+
+  void _tryFallbackStream(
+    html.MediaDevices mediaDevices,
+    Completer<void> completer,
+    Object originalError,
+  ) {
+    final message = originalError.toString();
+    // Don't retry permission errors - they won't succeed with different constraints
+    if (message.contains('NotAllowedError') || message.contains('Permission')) {
+      completer.completeError(originalError);
+      return;
+    }
+
+    // Try simpler constraints as fallback
+    final fallbackConstraints = js_util.jsify({
+      'audio': false,
+      'video': true,
+    });
+
+    final promise = js_util.callMethod<Object>(
+      mediaDevices,
+      'getUserMedia',
+      [fallbackConstraints],
+    );
+
+    js_util.promiseToFuture<html.MediaStream>(promise).then((stream) {
+      _onStreamAcquired(stream, completer);
+    }).catchError((error) {
+      completer.completeError(error);
+    });
   }
 
   Future<void> playPreview() async {
@@ -77,26 +148,6 @@ class WebCameraCaptureController {
     return lines.join('\n');
   }
 
-  Future<html.MediaStream> _getCameraStream(html.MediaDevices mediaDevices) async {
-    try {
-      return await mediaDevices.getUserMedia({
-        'audio': false,
-        'video': {
-          'facingMode': {'ideal': 'environment'},
-        },
-      });
-    } catch (e) {
-      final message = e.toString();
-      if (message.contains('NotAllowedError') || message.contains('Permission')) {
-        rethrow;
-      }
-
-      return mediaDevices.getUserMedia({
-        'audio': false,
-        'video': true,
-      });
-    }
-  }
 
   String _safeJsString(Object target, String property) {
     try {

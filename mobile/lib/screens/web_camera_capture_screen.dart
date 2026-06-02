@@ -27,15 +27,23 @@ class _WebCameraCaptureScreenState extends State<WebCameraCaptureScreen> {
     super.dispose();
   }
 
-  Future<void> _startCamera() async {
+  void _startCamera() {
+    // CRITICAL: Do NOT call setState() before _camera.start()!
+    // Mobile browsers require getUserMedia() to be called synchronously
+    // from the user gesture. Any setState/await before it breaks the gesture context.
+    
+    // Call start() IMMEDIATELY - it internally calls getUserMedia synchronously
+    final future = _camera.start();
+    
+    // NOW we can update UI state
     setState(() {
       _isStarting = true;
       _error = null;
       _diagnostics = null;
     });
 
-    try {
-      await _camera.start();
+    // Handle the result
+    future.then((_) {
       if (!mounted) return;
       setState(() {
         _isCameraReady = true;
@@ -44,7 +52,7 @@ class _WebCameraCaptureScreenState extends State<WebCameraCaptureScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _camera.playPreview();
       });
-    } catch (e) {
+    }).catchError((Object e) async {
       if (!mounted) return;
       final diagnostics = await _camera.diagnosticsForError(e);
       if (!mounted) return;
@@ -53,7 +61,7 @@ class _WebCameraCaptureScreenState extends State<WebCameraCaptureScreen> {
         _error = _cameraErrorMessage(e);
         _diagnostics = diagnostics;
       });
-    }
+    });
   }
 
   Future<void> _capturePhoto() async {
