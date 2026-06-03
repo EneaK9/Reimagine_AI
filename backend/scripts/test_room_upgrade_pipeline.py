@@ -34,7 +34,12 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help='User request, e.g. "How can this look better with just $100?"',
     )
-    parser.add_argument("--budget", type=float, required=True, help="Budget amount.")
+    parser.add_argument(
+        "--budget",
+        type=float,
+        default=None,
+        help="Optional budget amount. If omitted, the backend infers it from the prompt and image.",
+    )
     parser.add_argument("--currency", default="USD", help="Currency code.")
     parser.add_argument(
         "--base-url",
@@ -118,8 +123,8 @@ def analyze_room_upgrade(args: argparse.Namespace, image_path: Path) -> Dict[str
                 f"{args.base_url}/room-upgrade/analyze/upload",
                 data={
                     "prompt": args.prompt,
-                    "budget": str(args.budget),
                     "currency": args.currency,
+                    **({"budget": str(args.budget)} if args.budget is not None else {}),
                 },
                 files={"image": (image_path.name, image_file, mime_type)},
             )

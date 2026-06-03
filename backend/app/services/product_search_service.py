@@ -205,7 +205,7 @@ class ProductSearchService:
         products = await self.search_with_store_preference(
             item.search_description,
             max_price=item.budget_allocation * 1.5,
-            limit=6,  # Reduced from 15 to minimize data
+            limit=12,
         )
 
         # Single fallback with simpler query (1 API call if needed)
@@ -214,7 +214,7 @@ class ProductSearchService:
             products = await self.search_with_store_preference(
                 simple_query,
                 max_price=item.budget_allocation * 2,
-                limit=6,
+                limit=12,
             )
 
         return ProductSearchResult(

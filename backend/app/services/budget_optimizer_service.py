@@ -12,8 +12,9 @@ from ..models.schemas import ProductSearchResult, SelectedProduct
 
 settings = get_settings()
 
-# Target utilization: spend at least this percentage of budget
-MIN_BUDGET_UTILIZATION = 0.85
+# Target utilization: spend as close to the budget as possible without going over.
+MIN_BUDGET_UTILIZATION = 0.95
+MAX_CANDIDATES_PER_ITEM = 10
 
 
 class BudgetOptimizerService:
@@ -73,7 +74,7 @@ class BudgetOptimizerService:
                 {
                     "role": "user",
                     "content": f"""Total budget: ${budget:.2f}
-Minimum spending target: ${min_spend:.2f} (must spend at least 85% of budget)
+Minimum spending target: ${min_spend:.2f} (must spend at least 95% of budget)
 
 {summary}
 
@@ -81,7 +82,7 @@ IMPORTANT RULES:
 1. Select ALL items (both must-have AND nice-to-have) if they fit within budget
 2. Prefer HIGHER-PRICED options that are still within each item's budget allocation
 3. Choose quality items with good ratings - don't just pick the cheapest
-4. The total should be as close to ${budget:.2f} as possible (aim for 85-100%)
+4. The total should be as close to ${budget:.2f} as possible (aim for 95-100%)
 5. Only skip nice-to-have items if including them would exceed the total budget
 
 Pick one option per item to MAXIMIZE budget utilization while staying under ${budget:.2f}.
@@ -110,7 +111,7 @@ Return exactly:
                 f"Item {item_index}: {item.item_name} "
                 f"(target ${item.budget_allocation:.2f}, priority {item.priority})"
             )
-            for option_index, product in enumerate(result.all_candidates[:5]):
+            for option_index, product in enumerate(result.all_candidates[:MAX_CANDIDATES_PER_ITEM]):
                 rating = product.rating if product.rating is not None else "N/A"
                 lines.append(
                     f"  Option {option_index}: {product.title} - "
@@ -132,7 +133,7 @@ Return exactly:
 
             result = search_results[item_index]
             candidates = result.all_candidates
-            if option_index < 0 or option_index >= min(len(candidates), 5):
+            if option_index < 0 or option_index >= min(len(candidates), MAX_CANDIDATES_PER_ITEM):
                 continue
 
             selected.append(

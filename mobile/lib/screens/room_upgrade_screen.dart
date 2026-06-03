@@ -8,6 +8,7 @@ import '../models/room_upgrade.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/before_after_view.dart';
+import '../widgets/design_advice_card.dart';
 import '../widgets/product_approval_list.dart';
 import '../widgets/shopping_card.dart';
 
@@ -34,6 +35,8 @@ class _RoomUpgradeScreenState extends State<RoomUpgradeScreen> {
     text: 'How can this look better with just \$100?',
   );
   final _budgetController = TextEditingController(text: '100');
+  final _dimensionsController = TextEditingController();
+  final _cityController = TextEditingController();
 
   RoomUpgradeStatus _status = RoomUpgradeStatus.idle;
   XFile? _selectedImage;
@@ -42,11 +45,26 @@ class _RoomUpgradeScreenState extends State<RoomUpgradeScreen> {
   List<SelectedProduct> _selectedProducts = [];
   String? _afterImageUrl;
   String? _errorMessage;
+  YardDesignAdvice? _designAdvice;
+  bool _showAdvancedOptions = false;
+
+  // Yard design inputs
+  String? _orientation;
+  String? _surfaceType;
+  String? _slope;
+  String? _environmentType;
+  String? _primaryPurpose;
+  final List<String> _whoUses = [];
+  String? _maintenance;
+  String? _stylePreference;
+  String? _ownership;
 
   @override
   void dispose() {
     _promptController.dispose();
     _budgetController.dispose();
+    _dimensionsController.dispose();
+    _cityController.dispose();
     super.dispose();
   }
 
@@ -55,6 +73,20 @@ class _RoomUpgradeScreenState extends State<RoomUpgradeScreen> {
       _status == RoomUpgradeStatus.generating;
 
   double get _budget => double.tryParse(_budgetController.text.trim()) ?? 0;
+
+  YardDesignInputs get _yardInputs => YardDesignInputs(
+        dimensionsSqm: double.tryParse(_dimensionsController.text.trim()),
+        orientation: _orientation,
+        surfaceType: _surfaceType,
+        slope: _slope,
+        cityOrRegion: _emptyToNull(_cityController.text),
+        environmentType: _environmentType,
+        primaryPurpose: _primaryPurpose,
+        whoUses: _whoUses.isEmpty ? null : _whoUses,
+        maintenance: _maintenance,
+        stylePreference: _stylePreference,
+        ownership: _ownership,
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -78,6 +110,11 @@ class _RoomUpgradeScreenState extends State<RoomUpgradeScreen> {
               if (_status == RoomUpgradeStatus.generating)
                 _buildLoadingCard('Generating your upgraded space...'),
               if (_errorMessage != null) _buildErrorCard(),
+              if (_designAdvice != null && !_designAdvice!.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 18),
+                  child: DesignAdviceCard(advice: _designAdvice!),
+                ),
               if (_sceneAnalysis != null &&
                   _selectedProducts.isNotEmpty &&
                   _afterImageUrl == null)
@@ -190,8 +227,8 @@ class _RoomUpgradeScreenState extends State<RoomUpgradeScreen> {
             maxLines: 4,
             enabled: !_isBusy,
             decoration: const InputDecoration(
-              labelText: 'What do you want?',
-              hintText: 'Make this room look better for \$100',
+              labelText: 'What do you want? (optional)',
+              hintText: 'Optional: make this yard better for summer evenings',
             ),
           ),
           const SizedBox(height: 12),
@@ -205,6 +242,8 @@ class _RoomUpgradeScreenState extends State<RoomUpgradeScreen> {
             ),
           ),
           const SizedBox(height: 16),
+          _buildAdvancedOptionsSection(),
+          const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
@@ -216,6 +255,262 @@ class _RoomUpgradeScreenState extends State<RoomUpgradeScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildAdvancedOptionsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          onTap: () => setState(() => _showAdvancedOptions = !_showAdvancedOptions),
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              children: [
+                Icon(
+                  _showAdvancedOptions
+                      ? Icons.keyboard_arrow_up_rounded
+                      : Icons.keyboard_arrow_down_rounded,
+                  color: AppTheme.primaryColor,
+                  size: 20,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Advanced Options',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primaryColor,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  'Optional - for smarter recommendations',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 11,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_showAdvancedOptions) ...[
+          const SizedBox(height: 12),
+          _buildAdvancedOptions(),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildAdvancedOptions() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.inputBackground,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.border.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Row 1: Dimensions & City
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _dimensionsController,
+                  enabled: !_isBusy,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Size (m²)',
+                    hintText: 'e.g. 25',
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  controller: _cityController,
+                  enabled: !_isBusy,
+                  decoration: const InputDecoration(
+                    labelText: 'City/Region',
+                    hintText: 'e.g. Miami',
+                    isDense: true,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Row 2: Orientation & Surface
+          Row(
+            children: [
+              Expanded(
+                child: _buildDropdown(
+                  label: 'Orientation',
+                  value: _orientation,
+                  items: const ['north', 'south', 'east', 'west'],
+                  onChanged: (v) => setState(() => _orientation = v),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildDropdown(
+                  label: 'Surface',
+                  value: _surfaceType,
+                  items: const ['grass', 'concrete', 'gravel', 'decking', 'bare_soil', 'mixed'],
+                  onChanged: (v) => setState(() => _surfaceType = v),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Row 3: Environment & Purpose
+          Row(
+            children: [
+              Expanded(
+                child: _buildDropdown(
+                  label: 'Environment',
+                  value: _environmentType,
+                  items: const ['coastal', 'suburban', 'urban', 'rural', 'mountain'],
+                  onChanged: (v) => setState(() => _environmentType = v),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildDropdown(
+                  label: 'Main Purpose',
+                  value: _primaryPurpose,
+                  items: const ['dining', 'relaxing', 'children_play', 'food_growing', 'aesthetic'],
+                  onChanged: (v) => setState(() => _primaryPurpose = v),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Row 4: Slope & Maintenance
+          Row(
+            children: [
+              Expanded(
+                child: _buildDropdown(
+                  label: 'Slope',
+                  value: _slope,
+                  items: const ['flat', 'gentle', 'significant'],
+                  onChanged: (v) => setState(() => _slope = v),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildDropdown(
+                  label: 'Maintenance',
+                  value: _maintenance,
+                  items: const ['low', 'medium', 'high'],
+                  onChanged: (v) => setState(() => _maintenance = v),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Row 5: Style & Ownership
+          Row(
+            children: [
+              Expanded(
+                child: _buildDropdown(
+                  label: 'Style',
+                  value: _stylePreference,
+                  items: const ['modern', 'rustic', 'coastal', 'tropical', 'mediterranean', 'scandinavian', 'industrial'],
+                  onChanged: (v) => setState(() => _stylePreference = v),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildDropdown(
+                  label: 'Ownership',
+                  value: _ownership,
+                  items: const ['owner', 'renter'],
+                  onChanged: (v) => setState(() => _ownership = v),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Who uses this space (multi-select chips)
+          Text(
+            'Who uses this space?',
+            style: GoogleFonts.dmSans(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: ['adults', 'children', 'dogs', 'cats', 'elderly', 'entertaining'].map((user) {
+              final isSelected = _whoUses.contains(user);
+              return FilterChip(
+                label: Text(_formatLabel(user)),
+                selected: isSelected,
+                onSelected: _isBusy
+                    ? null
+                    : (selected) {
+                        setState(() {
+                          if (selected) {
+                            _whoUses.add(user);
+                          } else {
+                            _whoUses.remove(user);
+                          }
+                        });
+                      },
+                selectedColor: AppTheme.primaryColor.withValues(alpha: 0.2),
+                checkmarkColor: AppTheme.primaryColor,
+                labelStyle: GoogleFonts.dmSans(
+                  fontSize: 12,
+                  color: isSelected ? AppTheme.primaryColor : AppTheme.textSecondary,
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDropdown({
+    required String label,
+    required String? value,
+    required List<String> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return DropdownButtonFormField<String>(
+      initialValue: value,
+      decoration: InputDecoration(
+        labelText: label,
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      ),
+      items: [
+        const DropdownMenuItem<String>(value: null, child: Text('—')),
+        ...items.map((item) => DropdownMenuItem(
+              value: item,
+              child: Text(_formatLabel(item)),
+            )),
+      ],
+      onChanged: _isBusy ? null : onChanged,
+      style: GoogleFonts.dmSans(fontSize: 13, color: AppTheme.textPrimary),
+      isExpanded: true,
+    );
+  }
+
+  String _formatLabel(String value) {
+    return value.replaceAll('_', ' ').split(' ').map((word) {
+      if (word.isEmpty) return word;
+      return word[0].toUpperCase() + word.substring(1);
+    }).join(' ');
   }
 
   Widget _buildLoadingCard(String message) {
@@ -339,6 +634,7 @@ class _RoomUpgradeScreenState extends State<RoomUpgradeScreen> {
       _sceneAnalysis = null;
       _selectedProducts = [];
       _afterImageUrl = null;
+      _designAdvice = null;
       _errorMessage = null;
       _status = RoomUpgradeStatus.idle;
     });
@@ -359,17 +655,21 @@ class _RoomUpgradeScreenState extends State<RoomUpgradeScreen> {
       _status = RoomUpgradeStatus.analyzing;
       _errorMessage = null;
       _afterImageUrl = null;
+      _designAdvice = null;
     });
 
     try {
+      final yardInputs = _yardInputs;
       final result = await _apiService.analyzeRoomUpgrade(
         imageFile: image,
         prompt: _promptController.text.trim(),
         budget: _budget,
+        yardInputs: yardInputs.hasInputs ? yardInputs : null,
       );
       setState(() {
         _sceneAnalysis = result.sceneAnalysis;
         _selectedProducts = result.selectedProducts;
+        _designAdvice = result.designAdvice;
         _status = RoomUpgradeStatus.awaitingApproval;
       });
       if (result.selectedProducts.isEmpty) {
@@ -419,5 +719,10 @@ class _RoomUpgradeScreenState extends State<RoomUpgradeScreen> {
       _errorMessage = message;
       _status = RoomUpgradeStatus.error;
     });
+  }
+
+  String? _emptyToNull(String value) {
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : trimmed;
   }
 }

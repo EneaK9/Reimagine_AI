@@ -225,14 +225,22 @@ class ApiService {
     required String prompt,
     required double budget,
     String currency = 'USD',
+    YardDesignInputs? yardInputs,
   }) async {
     try {
-      final formData = FormData.fromMap({
+      final formMap = <String, dynamic>{
         'prompt': prompt,
         'budget': budget,
         'currency': currency,
         'image': await _multipartFromXFile(imageFile),
-      });
+      };
+
+      // Add optional yard design inputs if provided
+      if (yardInputs != null && yardInputs.hasInputs) {
+        formMap.addAll(yardInputs.toFormData());
+      }
+
+      final formData = FormData.fromMap(formMap);
 
       final response = await _dio.post(
         ApiConfig.roomUpgradeAnalyze,

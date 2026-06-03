@@ -13,6 +13,8 @@ from ..models.schemas import SceneAnalysis, ShoppingListItem
 
 settings = get_settings()
 
+MAX_SHOPPING_LIST_ITEMS = 8
+
 
 class SceneAnalysisService:
     def __init__(self):
@@ -61,10 +63,86 @@ class SceneAnalysisService:
         text = response.choices[0].message.content or "{}"
         return self._parse_scene_analysis(text, budget)
 
+    async def infer_budget(
+        self,
+        image_base64: str,
+        prompt: str,
+        currency: str = "USD",
+    ) -> float:
+        """
+        Infer a practical shopping budget when the user does not provide one.
+        Uses a cheap regex first, then asks the LLM, then falls back to heuristics.
+        """
+        explicit_budget = self.parse_budget(prompt)
+        if explicit_budget is not None and explicit_budget > 0:
+            return explicit_budget
+
+        image_base64 = self._strip_data_url(image_base64)
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                response_format={"type": "json_object"},
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You estimate realistic shopping budgets for room and yard "
+                            "makeovers. Return only valid JSON."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"""User request: "{prompt}"
+
+Look at the photo and infer a practical product-shopping budget in {currency}.
+Estimate only removable purchasable products such as furniture, lights, decor, planters, rugs, pillows, and accessories.
+Do NOT include construction costs such as flooring, tiles, concrete, landscaping, decks, pergolas, roofs, walls, or permanent hardscape.
+
+Return exactly:
+{{
+  "budget": 300,
+  "reasoning": "short explanation"
+}}
+
+Rules:
+- If the user implies a small refresh, use 150-300.
+- If the user implies a medium room/yard upgrade, use 300-600.
+- If the user mentions family hosting, kids, pets, gatherings, or summer evenings, use 600-900.
+- Use a round number ending in 0 or 50.
+- Return only JSON.""",
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{image_base64}"
+                                },
+                            },
+                        ],
+                    },
+                ],
+                max_tokens=200,
+                temperature=0.2,
+            )
+            data = self._load_json(response.choices[0].message.content or "{}")
+            budget = float(data.get("budget") or 0)
+            if budget > 0:
+                return budget
+        except Exception as exc:
+            print(f"Budget inference failed, using heuristic fallback: {exc}")
+
+        return self._fallback_budget(prompt)
+
     def parse_budget(self, prompt: str) -> Optional[float]:
         dollar_match = re.search(r"\$\s*(\d+(?:\.\d{1,2})?)", prompt)
         if dollar_match:
             return float(dollar_match.group(1))
+
+        trailing_dollar_match = re.search(r"(\d+(?:\.\d{1,2})?)\s*\$", prompt)
+        if trailing_dollar_match:
+            return float(trailing_dollar_match.group(1))
 
         word_match = re.search(
             r"(\d+(?:\.\d{1,2})?)\s*(dollars|bucks|usd)",
@@ -76,9 +154,23 @@ class SceneAnalysisService:
 
         return None
 
+    def _fallback_budget(self, prompt: str) -> float:
+        prompt_lower = prompt.lower()
+        if any(
+            token in prompt_lower
+            for token in ["family", "kids", "dog", "friends", "hosting", "hangout"]
+        ):
+            return 700.0
+        if any(token in prompt_lower for token in ["yard", "lawn", "patio", "outdoor"]):
+            return 500.0
+        if any(token in prompt_lower for token in ["cheap", "low budget", "simple"]):
+            return 200.0
+        return 300.0
+
     def _build_prompt(self, prompt: str, budget: float, currency: str) -> str:
-        # Calculate target spend per item to encourage fuller budget use
-        target_per_item = budget / 3  # Assume 3-4 items, aim high
+        # Start with a realistic per-item target, but allow the model to vary
+        # allocations so large budgets can become complete shopping lists.
+        target_per_item = budget / 6
 
         return f"""The user says: "{prompt}"
 Their total budget is {currency} {budget:.2f}.
@@ -127,14 +219,15 @@ PLACEMENT must be specific for image generation:
 - BAD: "centered on the patio" if no patio surface exists in the original photo
 
 RULES:
-1. Budget allocations MUST sum to at least {budget * 0.85:.2f} (use 85%+ of budget)
-2. Include exactly 2-3 items (NOT MORE) to minimize API calls
-3. First 2 items should be "must-have", third can be "nice-to-have"
+1. Budget allocations MUST sum to at least {budget * 0.95:.2f} (use 95%+ of budget)
+2. Include enough products to create a complete, budget-filling plan: usually 4-8 items, never fewer than 4 unless the budget is extremely small
+3. First 2-3 items should be "must-have"; the rest can be "nice-to-have"
 4. Allocate MORE budget to impactful items (furniture > decor)
 5. Make search descriptions DETAILED for better product matching
 6. Do NOT suggest products or placements that require adding/changing flooring, floor tiles, pavers, concrete slabs, decks, pergolas, roofs, walls, landscaping construction, or any permanent hardscape
 7. If the original image is mostly grass, keep it grass. Choose products that can sit on grass or existing visible paved borders
-8. Return only JSON. No markdown, no comments, no backticks."""
+8. Return up to {MAX_SHOPPING_LIST_ITEMS} shopping_list items
+9. Return only JSON. No markdown, no comments, no backticks."""
 
     def _parse_scene_analysis(self, text: str, budget: float) -> SceneAnalysis:
         data = self._load_json(text)
@@ -142,7 +235,7 @@ RULES:
         raw_items = data.get("shopping_list") or data.get("shoppingList") or []
         items = []
         running_total = 0.0
-        for raw_item in raw_items[:3]:  # Max 3 items to minimize API calls
+        for raw_item in raw_items[:MAX_SHOPPING_LIST_ITEMS]:
             allocation = float(
                 raw_item.get("budget_allocation")
                 or raw_item.get("budgetAllocation")
