@@ -7,6 +7,7 @@ import '../widgets/chat_bubble.dart';
 import '../widgets/chat_input.dart';
 import '../widgets/conversation_drawer.dart';
 import '../theme/app_theme.dart';
+import 'room_upgrade_screen.dart';
 import 'room_scan_screen.dart';
 
 /// Main chat screen with beautiful step-by-step design flow
@@ -77,7 +78,7 @@ class _ChatScreenState extends State<ChatScreen> {
             onTap: () => _scaffoldKey.currentState?.openDrawer(),
           ),
           const SizedBox(width: 16),
-          
+
           // Logo
           Container(
             width: 42,
@@ -94,15 +95,11 @@ class _ChatScreenState extends State<ChatScreen> {
               ],
             ),
             child: const Center(
-              child: Icon(
-                Icons.home_rounded,
-                color: Colors.white,
-                size: 22,
-              ),
+              child: Icon(Icons.home_rounded, color: Colors.white, size: 22),
             ),
           ),
           const SizedBox(width: 12),
-          
+
           // Title
           Expanded(
             child: Column(
@@ -138,7 +135,7 @@ class _ChatScreenState extends State<ChatScreen> {
               ],
             ),
           ),
-          
+
           // New Chat Button
           _buildIconButton(
             icon: Icons.add_rounded,
@@ -149,7 +146,10 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildIconButton({required IconData icon, required VoidCallback onTap}) {
+  Widget _buildIconButton({
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -160,11 +160,7 @@ class _ChatScreenState extends State<ChatScreen> {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: AppTheme.border),
         ),
-        child: Icon(
-          icon,
-          color: AppTheme.textPrimary,
-          size: 20,
-        ),
+        child: Icon(icon, color: AppTheme.textPrimary, size: 20),
       ),
     );
   }
@@ -173,7 +169,7 @@ class _ChatScreenState extends State<ChatScreen> {
     return Consumer<ChatProvider>(
       builder: (context, provider, child) {
         final messages = provider.messages;
-        
+
         if (messages.isEmpty) {
           return _buildWelcomeScreen();
         }
@@ -212,12 +208,12 @@ class _ChatScreenState extends State<ChatScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 20),
-          
+
           // Main Title Card
           _buildHeroCard(),
-          
+
           const SizedBox(height: 32),
-          
+
           // Step Indicator
           _buildStepSection(
             stepNumber: '1',
@@ -225,9 +221,9 @@ class _ChatScreenState extends State<ChatScreen> {
             isCompleted: false,
             child: _buildUploadSection(),
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // Room Type Selector
           _buildStepSection(
             stepNumber: '2',
@@ -235,7 +231,7 @@ class _ChatScreenState extends State<ChatScreen> {
             isCompleted: false,
             child: _buildRoomTypeSelector(),
           ),
-          
+
           const SizedBox(height: 32),
         ],
       ),
@@ -256,20 +252,14 @@ class _ChatScreenState extends State<ChatScreen> {
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: AppTheme.primaryColor.withOpacity(0.2),
-        ),
+        border: Border.all(color: AppTheme.primaryColor.withOpacity(0.2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(
-                Icons.auto_awesome,
-                color: AppTheme.primaryColor,
-                size: 20,
-              ),
+              Icon(Icons.auto_awesome, color: AppTheme.primaryColor, size: 20),
               const SizedBox(width: 8),
               Text(
                 'AI Powered',
@@ -368,10 +358,7 @@ class _ChatScreenState extends State<ChatScreen> {
             decoration: BoxDecoration(
               color: AppTheme.surface,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: AppTheme.border,
-                width: 2,
-              ),
+              border: Border.all(color: AppTheme.border, width: 2),
               boxShadow: AppTheme.cardShadow,
             ),
             child: Column(
@@ -416,9 +403,7 @@ class _ChatScreenState extends State<ChatScreen> {
           onTap: () {
             Navigator.push(
               context,
-              MaterialPageRoute(
-                builder: (context) => const RoomScanScreen(),
-              ),
+              MaterialPageRoute(builder: (context) => const RoomScanScreen()),
             );
           },
           child: Container(
@@ -471,7 +456,10 @@ class _ChatScreenState extends State<ChatScreen> {
                           ),
                           const SizedBox(width: 8),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
                             decoration: BoxDecoration(
                               color: AppTheme.primaryColor,
                               borderRadius: BorderRadius.circular(10),
@@ -490,6 +478,77 @@ class _ChatScreenState extends State<ChatScreen> {
                       const SizedBox(height: 4),
                       Text(
                         'Scan your room in 3D with AR',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 12,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  color: AppTheme.primaryColor,
+                  size: 18,
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        // Budget upgrade option
+        GestureDetector(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const RoomUpgradeScreen(),
+              ),
+            );
+          },
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: AppTheme.surface,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: AppTheme.primaryColor.withValues(alpha: 0.25),
+                width: 2,
+              ),
+              boxShadow: AppTheme.cardShadow,
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(
+                    Icons.shopping_bag_outlined,
+                    color: AppTheme.primaryColor,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Budget Upgrade',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Find real products and preview the look',
                         style: GoogleFonts.dmSans(
                           fontSize: 12,
                           color: AppTheme.textMuted,
@@ -552,7 +611,7 @@ class _ChatScreenState extends State<ChatScreen> {
       itemBuilder: (context, index) {
         final room = roomTypes[index];
         final isSelected = index == 0; // Default first selected
-        
+
         return GestureDetector(
           onTap: () {
             // Handle room type selection
@@ -561,7 +620,9 @@ class _ChatScreenState extends State<ChatScreen> {
             duration: const Duration(milliseconds: 200),
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: isSelected ? AppTheme.primaryColor.withOpacity(0.08) : AppTheme.surface,
+              color: isSelected
+                  ? AppTheme.primaryColor.withOpacity(0.08)
+                  : AppTheme.surface,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: isSelected ? AppTheme.primaryColor : AppTheme.border,
@@ -573,7 +634,9 @@ class _ChatScreenState extends State<ChatScreen> {
               children: [
                 Icon(
                   room['icon'] as IconData,
-                  color: isSelected ? AppTheme.primaryColor : AppTheme.textSecondary,
+                  color: isSelected
+                      ? AppTheme.primaryColor
+                      : AppTheme.textSecondary,
                   size: 24,
                 ),
                 const SizedBox(height: 8),
@@ -582,7 +645,9 @@ class _ChatScreenState extends State<ChatScreen> {
                   style: GoogleFonts.dmSans(
                     fontSize: 13,
                     fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                    color: isSelected ? AppTheme.primaryColor : AppTheme.textSecondary,
+                    color: isSelected
+                        ? AppTheme.primaryColor
+                        : AppTheme.textSecondary,
                   ),
                   textAlign: TextAlign.center,
                 ),

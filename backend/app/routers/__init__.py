@@ -1,2 +1,2 @@
 # ReimagineAI Routers
-from . import chat, images, auth, rooms
+from . import auth, chat, depth, images, room_upgrade, rooms

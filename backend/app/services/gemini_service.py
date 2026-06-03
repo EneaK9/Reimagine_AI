@@ -291,6 +291,111 @@ Make the edit now."""
             traceback.print_exc()
             return []
     
+    async def edit_room_with_products(
+        self,
+        room_image_base64: str,
+        product_images: List[bytes],
+        prompt: str,
+        max_retries: int = 3,
+    ) -> List[str]:
+        """
+        Edit a room image using multi-image fusion with product reference images.
+        
+        This method passes the room photo AND product images to Gemini,
+        allowing it to place the EXACT products into the scene.
+        
+        Args:
+            room_image_base64: Base64 encoded room/yard photo
+            product_images: List of product image bytes (up to 6)
+            prompt: Text prompt describing what to do with each product
+            max_retries: Maximum retry attempts on 503 errors
+        
+        Returns:
+            List of generated image data URLs
+        """
+        if not self.client:
+            print("Gemini API key not set")
+            return []
+
+        try:
+            # Decode room image
+            room_bytes = base64.b64decode(room_image_base64)
+
+            # Build contents list: prompt first, then room image, then product images
+            contents = [prompt]
+
+            # Add room image as "Image 1"
+            contents.append(
+                types.Part.from_bytes(data=room_bytes, mime_type="image/jpeg")
+            )
+
+            # Add product reference images (up to 6 to stay within limits)
+            for i, product_bytes in enumerate(product_images[:6]):
+                if product_bytes:
+                    # Try to detect mime type, default to jpeg
+                    mime_type = "image/jpeg"
+                    if product_bytes[:8].startswith(b'\x89PNG'):
+                        mime_type = "image/png"
+                    elif product_bytes[:4] == b'RIFF':
+                        mime_type = "image/webp"
+
+                    contents.append(
+                        types.Part.from_bytes(data=product_bytes, mime_type=mime_type)
+                    )
+                    print(f"  Added product image {i + 2} ({len(product_bytes)} bytes)")
+
+            results = []
+
+            # Retry loop for handling 503 errors
+            for attempt in range(max_retries):
+                try:
+                    print(f"Generating room upgrade with {len(product_images)} product references...")
+                    print(f"Using model: {self.model}" + (f" (attempt {attempt + 1}/{max_retries})" if attempt > 0 else ""))
+
+                    response = self.client.models.generate_content(
+                        model=self.model,
+                        contents=contents,
+                        config=types.GenerateContentConfig(
+                            response_modalities=["TEXT", "IMAGE"],
+                        )
+                    )
+
+                    # Extract generated image
+                    for part in response.candidates[0].content.parts:
+                        if part.inline_data is not None:
+                            img_base64 = base64.b64encode(part.inline_data.data).decode('utf-8')
+                            mime_type = part.inline_data.mime_type or "image/png"
+                            data_url = f"data:{mime_type};base64,{img_base64}"
+                            results.append(data_url)
+                            print(f"✓ Generated room with products")
+                            break
+
+                    if results:
+                        break
+
+                except Exception as e:
+                    error_str = str(e)
+                    if "503" in error_str or "UNAVAILABLE" in error_str or "overloaded" in error_str.lower():
+                        if attempt < max_retries - 1:
+                            wait_time = (attempt + 1) * 3
+                            print(f"⏳ Gemini overloaded, retrying in {wait_time}s... (attempt {attempt + 1}/{max_retries})")
+                            await asyncio.sleep(wait_time)
+                            continue
+                        else:
+                            print(f"❌ Gemini still overloaded after {max_retries} attempts")
+                    else:
+                        print(f"Gemini multi-image error: {e}")
+                        break
+
+            print(f"Generated {len(results)} room images with product fusion")
+            return results
+
+        except Exception as e:
+            print(f"Gemini multi-image fusion error: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+
     def get_available_styles(self) -> List[dict]:
         """Get list of available design styles."""
         return [

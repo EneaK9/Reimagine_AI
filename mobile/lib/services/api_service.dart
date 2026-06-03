@@ -1,33 +1,41 @@
+import 'dart:convert';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import '../config/api_config.dart';
+import '../models/room_upgrade.dart';
 
 /// API Service for communicating with the backend (Singleton)
 class ApiService {
   // Singleton instance
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
-  
+
   late final Dio _dio;
   String? _authToken;
+  String? get authToken => _authToken;
 
   ApiService._internal() {
-    _dio = Dio(BaseOptions(
-      baseUrl: ApiConfig.baseUrl,
-      connectTimeout: ApiConfig.connectTimeout,
-      receiveTimeout: ApiConfig.receiveTimeout,
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    ));
+    _dio = Dio(
+      BaseOptions(
+        baseUrl: ApiConfig.baseUrl,
+        connectTimeout: ApiConfig.connectTimeout,
+        receiveTimeout: ApiConfig.receiveTimeout,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      ),
+    );
 
     // Add logging interceptor for debugging
-    _dio.interceptors.add(LogInterceptor(
-      requestBody: true,
-      responseBody: true,
-      logPrint: (obj) => print('[API] $obj'),
-    ));
+    _dio.interceptors.add(
+      LogInterceptor(
+        requestBody: true,
+        responseBody: true,
+        logPrint: (obj) => debugPrint('[API] $obj'),
+      ),
+    );
   }
 
   /// Set auth token for authenticated requests
@@ -47,10 +55,7 @@ class ApiService {
     try {
       final response = await _dio.post(
         ApiConfig.login,
-        data: {
-          'email': email,
-          'password': password,
-        },
+        data: {'email': email, 'password': password},
       );
       final authResponse = AuthResponse.fromJson(response.data);
       setAuthToken(authResponse.token);
@@ -61,15 +66,15 @@ class ApiService {
   }
 
   /// Sign up new user
-  Future<AuthResponse> signup(String username, String email, String password) async {
+  Future<AuthResponse> signup(
+    String username,
+    String email,
+    String password,
+  ) async {
     try {
       final response = await _dio.post(
         ApiConfig.signup,
-        data: {
-          'username': username,
-          'email': email,
-          'password': password,
-        },
+        data: {'username': username, 'email': email, 'password': password},
       );
       final authResponse = AuthResponse.fromJson(response.data);
       setAuthToken(authResponse.token);
@@ -94,7 +99,7 @@ class ApiService {
     required String message,
     String? conversationId,
     String? imageBase64,
-    String? meshId,  // Pass mesh_id so backend can edit the mesh
+    String? meshId, // Pass mesh_id so backend can edit the mesh
   }) async {
     try {
       final response = await _dio.post(
@@ -118,7 +123,7 @@ class ApiService {
     required String message,
     required XFile imageFile,
     String? conversationId,
-    String? meshId,  // Pass mesh_id so backend can edit the mesh
+    String? meshId, // Pass mesh_id so backend can edit the mesh
   }) async {
     try {
       final formData = FormData.fromMap({
@@ -131,9 +136,7 @@ class ApiService {
       final response = await _dio.post(
         ApiConfig.chatWithImage,
         data: formData,
-        options: Options(
-          headers: {'Content-Type': 'multipart/form-data'},
-        ),
+        options: Options(headers: {'Content-Type': 'multipart/form-data'}),
       );
 
       return ChatResponse.fromJson(response.data);
@@ -157,7 +160,9 @@ class ApiService {
   /// Get a specific conversation
   Future<Map<String, dynamic>> getConversation(String conversationId) async {
     try {
-      final response = await _dio.get('${ApiConfig.conversations}/$conversationId');
+      final response = await _dio.get(
+        '${ApiConfig.conversations}/$conversationId',
+      );
       return response.data;
     } on DioException catch (e) {
       throw _handleError(e);
@@ -205,12 +210,90 @@ class ApiService {
       final response = await _dio.post(
         ApiConfig.analyzeRoom,
         data: formData,
-        options: Options(
-          headers: {'Content-Type': 'multipart/form-data'},
-        ),
+        options: Options(headers: {'Content-Type': 'multipart/form-data'}),
       );
 
       return response.data;
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Analyze a room photo, search real products, and optimize them for budget
+  Future<RoomUpgradeAnalyzeResponse> analyzeRoomUpgrade({
+    required XFile imageFile,
+    required String prompt,
+    required double budget,
+    String currency = 'USD',
+  }) async {
+    try {
+      final formData = FormData.fromMap({
+        'prompt': prompt,
+        'budget': budget,
+        'currency': currency,
+        'image': await _multipartFromXFile(imageFile),
+      });
+
+      final response = await _dio.post(
+        ApiConfig.roomUpgradeAnalyze,
+        data: formData,
+        options: Options(
+          headers: {'Content-Type': 'multipart/form-data'},
+          receiveTimeout: ApiConfig.longReceiveTimeout,
+        ),
+      );
+
+      return RoomUpgradeAnalyzeResponse.fromJson(response.data);
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Search and optimize products from an existing shopping list
+  Future<RoomUpgradeAnalyzeResponse> searchRoomUpgradeProducts({
+    required List<ShoppingListItem> shoppingList,
+    required double budget,
+    String currency = 'USD',
+  }) async {
+    try {
+      final response = await _dio.post(
+        ApiConfig.roomUpgradeSearch,
+        data: {
+          'shopping_list': shoppingList.map((item) => item.toJson()).toList(),
+          'budget': budget,
+          'currency': currency,
+        },
+        options: Options(receiveTimeout: ApiConfig.longReceiveTimeout),
+      );
+
+      return RoomUpgradeAnalyzeResponse.fromJson(response.data);
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Generate an AI preview using the approved products
+  Future<RoomUpgradeGenerateResponse> generateUpgradeImage({
+    required XFile imageFile,
+    required String prompt,
+    required SceneAnalysis sceneAnalysis,
+    required List<SelectedProduct> selectedProducts,
+  }) async {
+    try {
+      final response = await _dio.post(
+        ApiConfig.roomUpgradeGenerate,
+        data: {
+          'image_base64': await _base64FromXFile(imageFile),
+          'prompt': prompt,
+          'scene_analysis': sceneAnalysis.toJson(),
+          'selected_products': selectedProducts
+              .map((item) => item.toJson())
+              .toList(),
+        },
+        options: Options(receiveTimeout: ApiConfig.longReceiveTimeout),
+      );
+
+      return RoomUpgradeGenerateResponse.fromJson(response.data);
     } on DioException catch (e) {
       throw _handleError(e);
     }
@@ -241,7 +324,8 @@ class ApiService {
         options: Options(
           headers: {'Content-Type': 'multipart/form-data'},
           sendTimeout: ApiConfig.longReceiveTimeout,
-          receiveTimeout: ApiConfig.longReceiveTimeout, // 10 min for CPU processing
+          receiveTimeout:
+              ApiConfig.longReceiveTimeout, // 10 min for CPU processing
         ),
       );
 
@@ -258,6 +342,10 @@ class ApiService {
     );
   }
 
+  Future<String> _base64FromXFile(XFile imageFile) async {
+    return base64Encode(await imageFile.readAsBytes());
+  }
+
   /// Generate a 3D mesh from a base64 encoded image
   Future<Map<String, dynamic>> generateMeshFromBase64({
     required String imageBase64,
@@ -266,12 +354,10 @@ class ApiService {
     try {
       final response = await _dio.post(
         ApiConfig.depthGenerateMesh,
-        data: {
-          'image_base64': imageBase64,
-          'conversation_id': conversationId,
-        },
+        data: {'image_base64': imageBase64, 'conversation_id': conversationId},
         options: Options(
-          receiveTimeout: ApiConfig.longReceiveTimeout, // 10 min for CPU processing
+          receiveTimeout:
+              ApiConfig.longReceiveTimeout, // 10 min for CPU processing
         ),
       );
 
@@ -324,12 +410,10 @@ class ApiService {
     try {
       final response = await _dio.post(
         ApiConfig.depthUpdateMesh,
-        data: {
-          'image_base64': imageBase64,
-          'conversation_id': conversationId,
-        },
+        data: {'image_base64': imageBase64, 'conversation_id': conversationId},
         options: Options(
-          receiveTimeout: ApiConfig.longReceiveTimeout, // 10 min for CPU processing
+          receiveTimeout:
+              ApiConfig.longReceiveTimeout, // 10 min for CPU processing
         ),
       );
 
@@ -351,9 +435,10 @@ class ApiService {
           'Cannot connect to server. Make sure the backend is running.',
         );
       case DioExceptionType.badResponse:
-        final message = e.response?.data?['detail'] ?? 
-                        e.response?.data?['message'] ?? 
-                        'Server error occurred';
+        final message =
+            e.response?.data?['detail'] ??
+            e.response?.data?['message'] ??
+            'Server error occurred';
         return ApiException(message);
       default:
         return ApiException('An unexpected error occurred: ${e.message}');
@@ -376,8 +461,8 @@ class ChatResponse {
   final String message;
   final List<String> generatedImages;
   final List<Map<String, dynamic>> furnitureSuggestions;
-  final String? meshUrl;  // URL to updated 3D mesh (if conversation has mesh)
-  final String? meshId;   // Mesh ID for further edits
+  final String? meshUrl; // URL to updated 3D mesh (if conversation has mesh)
+  final String? meshId; // Mesh ID for further edits
 
   ChatResponse({
     required this.conversationId,
