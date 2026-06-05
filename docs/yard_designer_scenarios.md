@@ -221,6 +221,14 @@ Inputs combine. A coastal + small space + renter + $500 budget + dogs produces a
 - Raised beds need a membrane layer underneath to prevent grass growing up through them
 - Recommend lawn-edge products (steel edging, plastic border) to define zones cleanly
 - If lawn is poor quality: include lawn repair kit, overseeding product, or artificial grass as an option depending on budget
+- NEVER recommend outdoor rugs, carpets, or mats for grass/lawn surfaces — they trap moisture, kill the grass underneath, and look unnatural
+
+**Zone definition alternatives for grass (instead of rugs):**
+- Stepping stones or stepping stone path — easy to install, can be lifted and moved later
+- Interlocking deck tiles or composite deck squares — create an instant patio area without any digging
+- Patio slabs under furniture legs — prevents sinking and visually defines the seating area
+- Decorative gravel with edging — low-cost way to create a distinct zone within the lawn
+- Mosaic stepping stones — add visual interest and character to the space
 
 **Installation notes to show user:**
 - "Furniture placed directly on grass may sink after rain. We recommend furniture foot pads or a ground-level paving slab under each leg."
@@ -247,6 +255,14 @@ Inputs combine. A coastal + small space + renter + $500 budget + dogs produces a
 - Ground cover solution: gravel, bark chip, paving slabs, or decking tiles — depending on budget
 - Weed membrane under any loose material
 - Note: No furniture should be placed directly on bare soil — it will sink, become muddy, and be unusable in wet weather
+- NEVER recommend outdoor rugs, carpets, or mats for soil/mud surfaces — they trap moisture, get ruined, and serve no purpose
+
+**Recommended surface treatments (budget order):**
+1. Bark chip or wood chip with weed membrane — cheapest option, natural look
+2. Gravel or pea gravel with edging — clean appearance, low maintenance
+3. Interlocking deck tiles — instant patio without any digging
+4. Stepping stones or patio slabs — define paths and seating areas
+5. Full paving or decking — most expensive but most durable solution
 
 **Design rule:** Always include a surface treatment product as Priority 1 in the product list, before any furniture or planting recommendation.
 
@@ -684,7 +700,17 @@ Some combinations of layers compound their effect and require special handling:
 
 ---
 
-## 2.1 — Environment Type
+## 2.2 — Setting (Environment + City Context)
+
+This is the user-facing input for the runner UI. Internally it maps to:
+
+- **`environment_type`**: drives the environment scenario rules below (coastal/suburban/urban/rural/mountain)
+- **`city_context`**: only used when it materially changes climate/material assumptions (currently: coastal vs inland nuance)
+
+**Runner mapping (recommended):**
+- **Coastal / exposed** → `environment_type=coastal` + `city_context=coastal`
+- **Mountain / high altitude** → `environment_type=mountain` + `city_context=inland`
+- **Urban / Suburban / Rural** → `environment_type=<same>` + `city_context=unknown`
 
 ### Coastal / Beachside
 
@@ -766,6 +792,199 @@ Some combinations of layers compound their effect and require special handling:
 ---
 
 ---
+
+## 2.3 — Climate Override Chunks (derived from Location Profile)
+
+These override chunks are **triggered by the derived location profile** and must be treated as high-priority rules that can override generic environment/style assumptions.
+
+### 2.3.uv_mandatory — UV Override — Mandatory Rated Materials
+
+UV index above 8 confirmed for this location.
+- UV-rated certification mandatory on ALL fabrics, plastics, and composite materials
+- Light-coloured furniture preferred — dark colours absorb and retain dangerous heat levels
+- Check every product individually for UV stability certification before recommending
+- Recheck UV ratings annually — degradation accelerates above UV index 8
+
+### 2.3.shade_mandatory — Shade Override — Shade Structure is Priority 1
+
+July average high above 32°C confirmed for this location.
+- Shade structure is Priority 1 in the design — not optional, not an afterthought
+- No seating area should be placed in full unrelieved sun
+- Pergola, shade sail, or retractable canopy must appear in the product list before furniture
+- Dark metal furniture is dangerous above 35°C — exclude or require cushion coverage at all times
+- If July avg high exceeds 38°C: design entirely around shade; state that midday use is impractical without it
+
+### 2.3.irrigation_mandatory — Irrigation Override — Drip System Required
+
+Summer months confirmed below 30mm average rainfall for this location.
+- Irrigation is not optional for any planted area
+- Recommend drip irrigation kit as a required product, not an accessory
+- Self-watering planters worth the cost premium here — include as preferred option
+- Raised beds must include moisture-retention layer (water-retaining granules in compost)
+- All plant recommendations must be drought-tolerant or irrigation-dependent (flag which category each plant falls into)
+
+### 2.3.humidity_tropical — Humidity Override — Tropical Material Standards
+
+Summer relative humidity above 75% confirmed for this location.
+- Apply full tropical material standards regardless of temperature zone
+- Mould-resistant materials mandatory for every fabric product — no exceptions
+- Marine-grade hardware required for all fixings, hinges, and connectors
+- Untreated wood is excluded — teak, ipe, or powder-coated aluminium only
+- Inspect all products for mould inhibitor treatments before recommending
+- Include cleaning and maintenance schedule in seasonal notes
+
+### 2.3.wind_high — Wind Override — High Wind Product Rules
+
+Average wind speed above 20km/h confirmed for this location.
+- Wind-rated products only — no lightweight freestanding accessories
+- Parasol bases minimum 25kg; wind-vent parasol design mandatory
+- All freestanding screens require ground anchoring or ballast bases
+- Lightweight planters excluded unless they can be filled with ballast
+- Windbreak planting layer is the first recommendation before any ornamental planting
+- State prevailing wind direction and show windbreak position in placement diagram
+
+### 2.3.solar_unreliable — Solar Override — Solar Lighting Not Reliable
+
+Annual sunshine hours below 2000 confirmed for this location.
+- Solar-only lighting is not reliable year-round — do not recommend as primary solution
+- Battery-powered or mains-connected lighting required for October–April
+- Solar lighting acceptable as supplementary only, clearly labelled as such
+- Warn user explicitly: solar lights in this location will underperform in winter months
+
+### 2.3.altitude_uv_uplift — Altitude Override — Elevated UV Intensity
+
+Location confirmed above 1000m elevation.
+- UV intensity is significantly higher than sea-level cities at the same latitude
+- Apply UV-mandatory material rules regardless of what the UV index number alone suggests
+- Calculate uplift: approximately 4% increase per 300m above sea level
+- This is the most commonly missed factor in mountain garden design — flag explicitly to user
+- Fade and degradation timelines for fabrics and plastics are accelerated — factor into product quality recommendations
+
+### 2.3.frost_storage_required — Frost Override — Seasonal Storage Required
+
+First frost confirmed before November 1 for this location.
+- Outdoor storage solution is a required product recommendation — not optional
+- All cushions, fabric accessories, and cushion sets must have a storage destination
+- Water features must have a pump that can be removed and stored, or be fully drainable
+- Ceramic and concrete planters must be frost-proof rated — flag any that are not
+- Include a seasonal transition checklist in the output's seasonal notes section
+
+---
+
+## 2.4 — Plant Intelligence (Site Palette + Plant Brief Prompt)
+
+### 2.4.site_palette — Site Plant Palette — [CITY]
+
+This chunk is dynamically generated by the location intelligence call.
+It contains the viable and excluded plant categories for the specific site.
+
+Structure when populated:
+
+SITE PALETTE — [City, Country]
+Climate class: [e.g. Warm temperate / Mediterranean transitional]
+Growing season: [days] (Last frost: [date] / First frost: [date])
+Summer drought status: [e.g. Jun–Sep avg 28mm → irrigation required]
+Summer high: [°C] → [heat/shade consequence]
+UV: [index] → [material/plant consequence]
+Humidity: [%RH] → [mould risk level]
+Wind: [km/h] prevailing [direction] → [consequence]
+
+VIABLE PLANT CATEGORIES:
+✓ [Category] — [one-line reason why it works here]
+✓ [Category] — [one-line reason]
+[continue for all viable categories]
+
+EXCLUDED PLANT CATEGORIES:
+✗ [Category] — [one-line reason why it fails here]
+✗ [Category] — [one-line reason]
+[continue for all excluded categories]
+
+### Plant brief prompt (used by the Plant Spec service)
+
+```
+You are a panel of the world's leading landscape architects and horticultural experts. 
+You have been given a complete site brief and your task is to produce a professional 
+plant specification — the kind that would accompany a high-end landscape design proposal.
+
+You are not generating suggestions. You are writing a specification. Every recommendation 
+must be defensible on horticultural, climatic, aesthetic, and practical grounds simultaneously.
+
+SITE DATA:
+{site_palette}
+
+USER BRIEF:
+- Location: {city}, {country}
+- Garden dimensions: {dimensions}
+- Orientation: {orientation}
+- Surface type: {surface_type}
+- Style preference: {style}
+- Primary purpose: {primary_purpose}
+- Who uses the space: {who_uses}
+- Maintenance level: {maintenance}
+- Budget tier: {budget_tier}
+- Allergies: {allergies}
+- Pets: {pets}
+
+TASK:
+Produce a plant specification with a minimum of 3 and maximum of 6 plant recommendations.
+
+MANDATORY FILTERING — apply before selecting any plant:
+- If who_uses includes children: eliminate ALL plants with any toxicity to humans
+- If who_uses includes dogs: eliminate ALL plants toxic to dogs (check ASPCA list standard)
+- If who_uses includes cats: eliminate ALL plants toxic to cats
+- If allergies includes hay_fever: eliminate all high-airborne-pollen species 
+  (grasses in flower, buddleja, birch, privet, lilac)
+- If orientation is north-facing: eliminate all full-sun species
+- If maintenance is low: eliminate all species requiring more than 2 interventions per season
+- If surface_type is container/balcony: prioritise species that perform in containers, 
+  flag any that require in-ground planting
+
+EACH RECOMMENDATION MUST FOLLOW THIS EXACT STRUCTURE:
+
+---
+PLANT [NUMBER]
+
+Botanical name: [Genus species 'Cultivar']
+Common name: [Common name]
+Category: [Hardy perennial / Annual / Shrub / Tree / Climber / Bulb / Grass]
+Hardiness: [Zone rating and minimum temperature]
+
+WHY THIS PLANT FOR THIS SITE:
+[2–3 sentences. Reference specific site data values — UV index, frost dates, rainfall, 
+summer high. This must read like a horticultural expert justifying a choice to a client, 
+not a garden centre label. Name the science.]
+
+WHY THIS PLANT FOR THIS BRIEF:
+[2–3 sentences. Connect to the style brief, the user's purpose, the maintenance level, 
+and who uses the space. Explain how it earns its place in this specific design.]
+
+PROFESSIONAL CARE NOTE:
+[2–3 sentences of expert planting and maintenance guidance. Include: optimal planting 
+position within the garden, spacing, soil preparation, pruning timing, and one 
+professional trick that a non-expert would not know.]
+
+PAIRING SUGGESTION:
+[Name one other plant — either from this list or a complementary addition — and explain 
+in one sentence why the combination works structurally, texturally, or seasonally.]
+
+Seasonal role: [Which seasons this plant performs, and what it contributes in off-seasons]
+Availability: [Widely available / Specialist nursery / Mail order / Seasonal only]
+---
+
+After all plant recommendations, add:
+
+PLANTING SCHEME NOTES:
+[One paragraph, 4–6 sentences. Describe how these plants work together as a scheme — 
+the sequence of seasonal interest across the year, the structural hierarchy 
+(backdrop / mid-layer / foreground), and one layout principle for how they should be 
+arranged in this specific garden. Write this as a landscape architect would write 
+a design rationale, not as a list.]
+
+WHAT WAS EXCLUDED AND WHY:
+[List 3–5 plant categories or specific species that might seem obvious choices for 
+this location or style but were excluded. Give the professional reason for each exclusion. 
+This section builds trust — it shows the reasoning is rigorous, not just a generic list.]
+```
 
 # MODULE 3 — USER AND LIFESTYLE INPUTS
 

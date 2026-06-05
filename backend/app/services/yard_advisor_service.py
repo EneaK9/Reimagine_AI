@@ -15,6 +15,7 @@ from .scenario_context_service import (
     YardInputs,
     scenario_context_service,
 )
+from ..utils.dimensions import format_area, format_yard_dimensions
 
 settings = get_settings()
 
@@ -92,6 +93,12 @@ Analyze the user's situation and generate a comprehensive design plan. Your resp
 Write naturally and helpfully. The user should feel like they're getting advice from a knowledgeable friend, not reading a rulebook."""
 
 
+LOCATION_ASSESSMENT_REQUIREMENT = """IMPORTANT: The user may provide only a city/location and we may derive the rest.
+You MUST include a clear location assessment in the output:
+- Add at least one item in space_assessment.key_characteristics that references the derived climate risks (UV/heat/humidity/wind/frost).
+- Also include a key_constraint titled \"Location & climate profile\" summarizing the most important derived constraints and what they mean."""
+
+
 class YardAdvisorService:
     """
     Generates comprehensive design advice using LLM with focused scenario context.
@@ -106,6 +113,10 @@ class YardAdvisorService:
         self,
         inputs: YardInputs,
         photo_analysis: Optional[Dict[str, Any]] = None,
+        location_profile: Optional[Dict[str, Any]] = None,
+        site_palette: Optional[str] = None,
+        override_chunk_ids: Optional[List[str]] = None,
+        dynamic_chunks: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Generate comprehensive design advice based on user inputs.
@@ -121,18 +132,32 @@ class YardAdvisorService:
         if not self.context_service.has_inputs(inputs):
             return self._empty_advice()
         
-        # Assemble relevant context
-        context = self.context_service.assemble_context(inputs, max_tokens=6000)
+        # Assemble relevant context (including optional overrides and dynamic chunks)
+        context = self.context_service.assemble_context(
+            inputs,
+            max_tokens=6000,
+            extra_chunk_ids=override_chunk_ids,
+            dynamic_chunks=dynamic_chunks,
+        )
         context_text = self.context_service.format_for_prompt(context)
         
         print(f"[YardAdvisor] Assembled {len(context.chunk_ids)} chunks, ~{context.total_tokens} tokens")
         print(f"[YardAdvisor] Chunks: {context.chunk_ids}")
         
         # Build system prompt with context
-        system_prompt = ADVISOR_SYSTEM_PROMPT.format(context=context_text)
+        system_prompt = (
+            ADVISOR_SYSTEM_PROMPT.format(context=context_text)
+            + "\n\n"
+            + LOCATION_ASSESSMENT_REQUIREMENT
+        )
         
         # Build user prompt
-        user_prompt = self._build_user_prompt(inputs, photo_analysis)
+        user_prompt = self._build_user_prompt(
+            inputs,
+            photo_analysis=photo_analysis,
+            location_profile=location_profile,
+            site_palette=site_palette,
+        )
         
         try:
             response = await self.client.chat.completions.create(
@@ -166,6 +191,8 @@ class YardAdvisorService:
         self,
         inputs: YardInputs,
         photo_analysis: Optional[Dict[str, Any]] = None,
+        location_profile: Optional[Dict[str, Any]] = None,
+        site_palette: Optional[str] = None,
     ) -> str:
         """Build the user prompt with all available information."""
         
@@ -173,9 +200,23 @@ class YardAdvisorService:
         
         # Add input summary
         parts.append("## USER'S SITUATION:\n")
-        
-        if inputs.dimensions_sqm is not None:
-            parts.append(f"- Space size: approximately {inputs.dimensions_sqm} m²")
+
+        yard_dims = format_yard_dimensions(
+            yard_length=getattr(inputs, "yard_length", None),
+            yard_width=getattr(inputs, "yard_width", None),
+            unit_system=getattr(inputs, "unit_system", None),
+        )
+        area = format_area(
+            area_sqm=getattr(inputs, "dimensions_sqm", None),
+            unit_system=getattr(inputs, "unit_system", None),
+        )
+
+        if yard_dims and area:
+            parts.append(f"- Space dimensions: {yard_dims} (approx. {area})")
+        elif yard_dims:
+            parts.append(f"- Space dimensions: {yard_dims}")
+        elif area:
+            parts.append(f"- Space size: approximately {area}")
         if inputs.orientation:
             parts.append(f"- Orientation: {inputs.orientation}-facing")
         if inputs.surface_type:
@@ -210,6 +251,32 @@ class YardAdvisorService:
                     parts.append(f"- Existing items: {', '.join(items)}")
             if photo_analysis.get("style_observation"):
                 parts.append(f"- Current style: {photo_analysis['style_observation']}")
+
+        if location_profile:
+            parts.append("\n## LOCATION INTELLIGENCE (DERIVED):\n")
+            # Keep this short and high-signal; the full details are in the scenario context chunks.
+            for key in [
+                "country_or_region",
+                "usda_hardiness_zone",
+                "annual_rainfall_mm",
+                "july_avg_high_c",
+                "annual_sunshine_hours",
+                "solar_lighting_viability",
+                "uv_index_summer",
+                "summer_humidity_pct",
+                "avg_wind_kmh",
+                "prevailing_wind_direction",
+                "elevation_m",
+                "first_frost_month",
+                "irrigation_required",
+                "special_flags",
+            ]:
+                if key in location_profile and location_profile.get(key) not in (None, "", [], {}):
+                    parts.append(f"- {key}: {location_profile.get(key)}")
+
+        if site_palette:
+            parts.append("\n## SITE PALETTE:\n")
+            parts.append(site_palette)
         
         parts.append("\n\nGenerate the complete design plan now as a JSON object.")
         

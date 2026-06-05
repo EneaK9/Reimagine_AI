@@ -58,6 +58,62 @@ CHUNK_INDEX: Dict[str, Dict[str, List[str]]] = {
         "rural": ["2.2.rural"],
         "mountain": ["2.2.mountain"],
     },
+
+    # ========== MODULE 2.3 - CLIMATE OVERRIDES (from location intelligence output) ==========
+    # These are not user inputs. They are populated programmatically from the 
+    # location intelligence API response using threshold checks.
+    
+    "uv_index_summer": {
+        "above_8": ["2.3.uv_mandatory"],
+        "above_6": [],
+    },
+    "july_avg_high_c": {
+        "above_38": ["2.3.shade_mandatory"],
+        "above_32": ["2.3.shade_mandatory"],
+    },
+    "irrigation_required": {
+        "mandatory": ["2.3.irrigation_mandatory"],
+        "recommended": [],
+        "not_needed": [],
+    },
+    "summer_humidity_pct": {
+        "above_75": ["2.3.humidity_tropical"],
+        "above_65": [],
+    },
+    "avg_wind_kmh": {
+        "above_20": ["2.3.wind_high"],
+        "above_12": [],
+    },
+    "solar_lighting_viable": {
+        "not_recommended": ["2.3.solar_unreliable"],
+        "summer_only": [],
+        "year_round": [],
+    },
+    "elevation_m": {
+        "above_1000": ["2.3.altitude_uv_uplift"],
+    },
+    "first_frost_before_nov": {
+        "true": ["2.3.frost_storage_required"],
+        "false": [],
+    },
+
+    # ========== MODULE 2.4 - PLANT INTELLIGENCE ==========
+    # The site palette chunk (2.4.site_palette) is injected dynamically at runtime.
+    # The PLANT_BRIEF_PROMPT is called as a separate API call after all user inputs 
+    # are collected. It does not use the chunk index — it uses direct variable injection.
+    # 
+    # The following index maps user inputs to plant constraint flags that are passed 
+    # into the PLANT_BRIEF_PROMPT as pre-computed filters, not as chunk lookups.
+
+    "plant_constraints": {
+        "children": ["filter:no_toxic_to_humans"],
+        "dogs": ["filter:no_toxic_to_dogs"],
+        "cats": ["filter:no_toxic_to_cats"],
+        "hay_fever": ["filter:no_high_airborne_pollen"],
+        "north_facing": ["filter:no_full_sun_species"],
+        "low_maintenance": ["filter:max_2_interventions_per_season"],
+        "container_only": ["filter:container_viable_species_only"],
+    },
     
     # ========== MODULE 3.1 - WHO USES THE SPACE ==========
     "who_uses": {
@@ -281,3 +337,82 @@ def lookup_chunks(field: str, value: str) -> List[str]:
     """
     field_index = CHUNK_INDEX.get(field, {})
     return field_index.get(value.lower() if isinstance(value, str) else value, [])
+
+
+def get_climate_override_chunks(location_profile: dict) -> list:
+    """
+    Takes the structured output of the location intelligence API call and returns
+    the list of 2.3.* override chunk IDs that apply to this location.
+    
+    location_profile keys expected:
+        uv_index_summer: int
+        july_avg_high_c: float
+        irrigation_required: str  ("mandatory" / "recommended" / "not_needed")
+        summer_humidity_pct: float
+        avg_wind_kmh: float
+        solar_lighting_viable: str  ("year_round" / "summer_only" / "not_recommended")
+        elevation_m: float
+        first_frost_month: int  (month number, e.g. 10 for October)
+    
+    Returns list of chunk IDs.
+    """
+    chunks = []
+    
+    if location_profile.get("uv_index_summer", 0) >= 8:
+        chunks.extend(lookup_chunks("uv_index_summer", "above_8"))
+    
+    if location_profile.get("july_avg_high_c", 0) >= 32:
+        chunks.extend(lookup_chunks("july_avg_high_c", "above_32"))
+    
+    if location_profile.get("irrigation_required") == "mandatory":
+        chunks.extend(lookup_chunks("irrigation_required", "mandatory"))
+    
+    if location_profile.get("summer_humidity_pct", 0) >= 75:
+        chunks.extend(lookup_chunks("summer_humidity_pct", "above_75"))
+    
+    if location_profile.get("avg_wind_kmh", 0) >= 20:
+        chunks.extend(lookup_chunks("avg_wind_kmh", "above_20"))
+    
+    if location_profile.get("solar_lighting_viable") == "not_recommended":
+        chunks.extend(lookup_chunks("solar_lighting_viable", "not_recommended"))
+    
+    if location_profile.get("elevation_m", 0) >= 1000:
+        chunks.extend(lookup_chunks("elevation_m", "above_1000"))
+    
+    first_frost_month = location_profile.get("first_frost_month") or 12
+    if first_frost_month <= 10:
+        chunks.extend(lookup_chunks("first_frost_before_nov", "true"))
+    
+    return list(set(chunks))  # deduplicate
+
+
+def get_plant_constraints(user_inputs: dict) -> list:
+    """
+    Takes user inputs and returns the list of plant filter flags to inject 
+    into the PLANT_BRIEF_PROMPT.
+    
+    Returns list of filter strings like "filter:no_toxic_to_dogs"
+    """
+    constraints = []
+    
+    who_uses = user_inputs.get("who_uses", [])
+    if isinstance(who_uses, str):
+        who_uses = [who_uses]
+    
+    for user_type in who_uses:
+        flags = CHUNK_INDEX.get("plant_constraints", {}).get(user_type.lower(), [])
+        constraints.extend(flags)
+    
+    if user_inputs.get("allergies") in ["hay_fever", "pollen"]:
+        constraints.extend(CHUNK_INDEX["plant_constraints"].get("hay_fever", []))
+    
+    if user_inputs.get("orientation") == "north":
+        constraints.extend(CHUNK_INDEX["plant_constraints"].get("north_facing", []))
+    
+    if user_inputs.get("maintenance") == "low":
+        constraints.extend(CHUNK_INDEX["plant_constraints"].get("low_maintenance", []))
+    
+    if user_inputs.get("surface_type") in ["balcony", "container"]:
+        constraints.extend(CHUNK_INDEX["plant_constraints"].get("container_only", []))
+    
+    return list(set(constraints))  # deduplicate

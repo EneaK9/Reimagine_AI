@@ -232,10 +232,19 @@ RULES:
     def _parse_scene_analysis(self, text: str, budget: float) -> SceneAnalysis:
         data = self._load_json(text)
 
+        # Detect if the scene has grass/lawn surfaces (rugs are inappropriate there)
+        existing_items = data.get("existing_items") or data.get("existingItems") or []
+        existing_text = " ".join(str(item).lower() for item in existing_items)
+        has_grass = any(kw in existing_text for kw in ["grass", "lawn", "turf", "soil", "dirt", "mud"])
+
         raw_items = data.get("shopping_list") or data.get("shoppingList") or []
         items = []
         running_total = 0.0
         for raw_item in raw_items[:MAX_SHOPPING_LIST_ITEMS]:
+            # Filter out rugs/carpets/mats if scene has grass surfaces
+            item_name = (raw_item.get("item_name") or raw_item.get("itemName") or "").lower()
+            if has_grass and any(kw in item_name for kw in ["rug", "carpet", "mat", "runner"]):
+                continue
             allocation = float(
                 raw_item.get("budget_allocation")
                 or raw_item.get("budgetAllocation")

@@ -28,6 +28,11 @@ class DesignStyle(str, Enum):
     CLASSIC = "classic"
 
 
+class UnitSystem(str, Enum):
+    METRIC = "metric"
+    IMPERIAL = "imperial"
+
+
 # ============ Chat Schemas ============
 
 class ChatMessage(BaseModel):
@@ -173,6 +178,10 @@ class RoomUpgradeGenerateRequest(BaseModel):
     prompt: str = ""
     scene_analysis: SceneAnalysis
     selected_products: List[SelectedProduct]
+    unit_system: Optional[UnitSystem] = None
+    yard_length: Optional[float] = Field(default=None, ge=0, description="Yard length in chosen unit_system (m or ft)")
+    yard_width: Optional[float] = Field(default=None, ge=0, description="Yard width in chosen unit_system (m or ft)")
+    plant_spec: Optional[str] = Field(default=None, description="Plant specification text for including recommended plants in image generation")
 
 
 class RoomUpgradeGenerateResponse(BaseModel):
@@ -183,17 +192,76 @@ class RoomUpgradeGenerateResponse(BaseModel):
 
 # ============ Yard Designer Schemas ============
 
+class CityContext(str, Enum):
+    COASTAL = "coastal"
+    INLAND = "inland"
+    UNKNOWN = "unknown"
+
+
+class LocationProfile(BaseModel):
+    """
+    Structured climate profile derived dynamically from city/location.
+    Intended to be produced by a location intelligence LLM call and validated here.
+    """
+    city: str
+    country_or_region: Optional[str] = None
+    city_context: Optional[CityContext] = None
+
+    usda_hardiness_zone: Optional[str] = None
+    annual_rainfall_mm: Optional[float] = Field(default=None, ge=0)
+    monthly_rainfall_mm: Optional[List[float]] = None  # Jan–Dec
+    summer_dry_months: Optional[List[str]] = None
+    irrigation_required: Optional[Literal["mandatory", "recommended", "not_needed"]] = None
+
+    july_avg_high_c: Optional[float] = None
+    july_avg_high_f: Optional[float] = None
+    shade_structure_priority: Optional[Literal["mandatory", "recommended", "optional"]] = None
+
+    last_spring_frost_date: Optional[str] = None
+    first_autumn_frost_date: Optional[str] = None
+    first_frost_month: Optional[int] = Field(default=None, ge=1, le=12)
+    growing_season_days: Optional[int] = Field(default=None, ge=0)
+
+    annual_sunshine_hours: Optional[int] = Field(default=None, ge=0)
+    solar_lighting_viability: Optional[Literal["year_round", "summer_only", "not_recommended"]] = None
+
+    uv_index_summer: Optional[int] = Field(default=None, ge=0)
+    uv_rated_materials_required: Optional[Literal["mandatory", "recommended", "standard"]] = None
+
+    summer_humidity_pct: Optional[float] = Field(default=None, ge=0, le=100)
+    humidity_risk_level: Optional[Literal["low", "moderate", "high", "tropical"]] = None
+
+    avg_wind_kmh: Optional[float] = Field(default=None, ge=0)
+    prevailing_wind_direction: Optional[str] = None
+    wind_risk_level: Optional[Literal["low", "moderate", "high"]] = None
+
+    elevation_m: Optional[float] = Field(default=None, ge=0)
+    uv_altitude_adjustment_needed: Optional[Literal["yes", "no"]] = None
+    uv_altitude_uplift_pct: Optional[float] = Field(default=None, ge=0)
+
+    special_flags: List[str] = Field(default_factory=list)
+    plant_hardiness_summary: Optional[str] = None
+    material_durability_summary: Optional[str] = None
+
+    data_quality: Optional[Literal["high", "medium", "low"]] = None
+    assumptions: List[str] = Field(default_factory=list)
+
+
 class YardDesignInputs(BaseModel):
     """
     Optional inputs for yard design advisor.
     All fields are optional - the system works without them,
     but each input improves the advice quality.
     """
-    dimensions_sqm: Optional[float] = Field(default=None, ge=0, description="Approximate space size in square meters")
+    unit_system: Optional[UnitSystem] = Field(default=None, description="Preferred measurement system for yard + product dimensions")
+    yard_length: Optional[float] = Field(default=None, ge=0, description="Yard length in chosen unit_system (m or ft)")
+    yard_width: Optional[float] = Field(default=None, ge=0, description="Yard width in chosen unit_system (m or ft)")
+    dimensions_sqm: Optional[float] = Field(default=None, ge=0, description="Approximate space size in square meters (computed internally from yard_length×yard_width when provided)")
     orientation: Optional[Literal["north", "south", "east", "west"]] = Field(default=None, description="Compass direction the space faces")
     surface_type: Optional[Literal["grass", "concrete", "gravel", "decking", "bare_soil", "mixed"]] = Field(default=None, description="Primary ground surface")
     slope: Optional[Literal["flat", "gentle", "significant"]] = Field(default=None, description="Ground slope level")
     city_or_region: Optional[str] = Field(default=None, description="City or region for climate determination")
+    city_context: Optional[CityContext] = Field(default=None, description="City context: coastal vs inland vs unknown")
     environment_type: Optional[Literal["coastal", "suburban", "urban", "rural", "mountain"]] = Field(default=None, description="Type of environment")
     primary_purpose: Optional[Literal["dining", "relaxing", "children_play", "food_growing", "aesthetic"]] = Field(default=None, description="Main intended use")
     who_uses: Optional[List[str]] = Field(default=None, description="Who uses the space: adults, children, dogs, cats, elderly, etc.")
@@ -278,6 +346,9 @@ class YardUpgradeAnalyzeResponse(BaseModel):
     """
     # Design advice (only present if yard inputs were provided)
     design_advice: Optional[YardDesignAdvice] = None
+    # Optional derived location profile and plant specification
+    location_profile: Optional[LocationProfile] = None
+    plant_spec: Optional[str] = None
     # Standard room upgrade fields
     scene_analysis: SceneAnalysis
     search_results: List[ProductSearchResult] = Field(default_factory=list)

@@ -33,11 +33,15 @@ class YardInputs:
     Lightweight input container for context assembly.
     All fields are optional - the service works with whatever is provided.
     """
+    unit_system: Optional[str] = None
+    yard_length: Optional[float] = None
+    yard_width: Optional[float] = None
     dimensions_sqm: Optional[float] = None
     orientation: Optional[str] = None
     surface_type: Optional[str] = None
     slope: Optional[str] = None
     city_or_region: Optional[str] = None
+    city_context: Optional[str] = None
     environment_type: Optional[str] = None
     primary_purpose: Optional[str] = None
     who_uses: Optional[List[str]] = None
@@ -67,6 +71,8 @@ class ScenarioContextService:
         self,
         inputs: YardInputs,
         max_tokens: int = 8000,
+        extra_chunk_ids: Optional[List[str]] = None,
+        dynamic_chunks: Optional[List[Dict[str, Any]]] = None,
     ) -> AssembledContext:
         """
         Assemble relevant scenario chunks based on user inputs.
@@ -131,12 +137,27 @@ class ScenarioContextService:
         # 12. Style preference
         if inputs.style_preference:
             required_chunk_ids.update(lookup_chunks("style_preference", inputs.style_preference))
+
+        # 13. Extra chunk IDs (e.g., 2.3 climate overrides)
+        if extra_chunk_ids:
+            required_chunk_ids.update(extra_chunk_ids)
         
-        # Collect and sort chunks by priority (higher first)
-        chunks = []
+        # Collect chunks into a dict so dynamic chunks can override static ones by id.
+        chunks_by_id: Dict[str, Dict[str, Any]] = {}
         for chunk_id in required_chunk_ids:
             if chunk_id in self.chunks:
-                chunks.append(self.chunks[chunk_id])
+                chunks_by_id[chunk_id] = self.chunks[chunk_id]
+
+        # Add or override with dynamic chunks (e.g., populated 2.4.site_palette)
+        if dynamic_chunks:
+            for chunk in dynamic_chunks:
+                chunk_id = chunk.get("id")
+                if not chunk_id:
+                    continue
+                chunks_by_id[str(chunk_id)] = chunk
+
+        # Collect and sort chunks by priority (higher first)
+        chunks = list(chunks_by_id.values())
         
         chunks.sort(key=lambda c: c.get("priority", 0), reverse=True)
         
@@ -223,6 +244,8 @@ class ScenarioContextService:
             True if at least one input field is set
         """
         return any([
+            inputs.yard_length is not None,
+            inputs.yard_width is not None,
             inputs.dimensions_sqm is not None,
             inputs.orientation,
             inputs.surface_type,
@@ -249,6 +272,14 @@ class ScenarioContextService:
         """
         summary = {}
         
+        if inputs.unit_system:
+            summary["unit_system"] = str(inputs.unit_system)
+
+        if inputs.yard_length is not None or inputs.yard_width is not None:
+            length = "" if inputs.yard_length is None else str(inputs.yard_length)
+            width = "" if inputs.yard_width is None else str(inputs.yard_width)
+            summary["yard_dimensions"] = f"{length} x {width}".strip()
+
         if inputs.dimensions_sqm is not None:
             summary["dimensions"] = f"{inputs.dimensions_sqm} m²"
         if inputs.orientation:

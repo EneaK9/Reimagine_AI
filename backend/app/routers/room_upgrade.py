@@ -5,10 +5,10 @@ Uses multi-image fusion to place actual product images into the scene.
 """
 import asyncio
 import base64
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 
 from ..models.schemas import (
@@ -27,6 +27,7 @@ from ..models.schemas import (
     ProductRequirement,
     DesignWarning,
     SeasonalNotes,
+    CityContext,
 )
 from ..services.budget_optimizer_service import budget_optimizer_service
 from ..services.gemini_service import gemini_service
@@ -34,6 +35,16 @@ from ..services.product_search_service import product_search_service
 from ..services.scene_analysis_service import scene_analysis_service
 from ..services.yard_advisor_service import yard_advisor_service
 from ..services.scenario_context_service import YardInputs
+from ..services.location_intelligence_service import location_intelligence_service
+from ..services.plant_spec_service import plant_spec_service
+from ..services.plant_image_service import plant_image_service
+from ..data.chunk_index import get_climate_override_chunks
+from ..utils.dimensions import (
+    compute_area_sqm,
+    format_area,
+    format_yard_dimensions,
+    normalize_dimensions_string,
+)
 
 router = APIRouter(prefix="/room-upgrade", tags=["Room Upgrade"])
 
@@ -52,36 +63,7 @@ async def room_upgrade_runner():
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Room Upgrade Runner</title>
-  <style>
-    :root { color-scheme: light dark; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; background: #0f172a; color: #e5e7eb; }
-    main { max-width: 1100px; margin: 0 auto; padding: 28px; }
-    h1 { margin: 0 0 8px; font-size: 32px; }
-    p { color: #94a3b8; }
-    .card { background: #111827; border: 1px solid #334155; border-radius: 18px; padding: 18px; margin: 18px 0; }
-    label { display: block; font-weight: 700; margin-bottom: 8px; }
-    input, textarea, select, button { width: 100%; box-sizing: border-box; border-radius: 12px; border: 1px solid #475569; padding: 12px; font: inherit; }
-    textarea, input, select { background: #020617; color: #e5e7eb; }
-    textarea { min-height: 110px; resize: vertical; }
-    button { margin-top: 14px; border: 0; background: #7c3aed; color: white; font-weight: 800; cursor: pointer; }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
-    .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-    .field { display: flex; flex-direction: column; gap: 8px; }
-    .checks { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
-    .checks label { display: inline-flex; align-items: center; gap: 6px; width: auto; font-weight: 500; color: #cbd5e1; }
-    .checks input { width: auto; }
-    img { width: 100%; border-radius: 14px; border: 1px solid #334155; object-fit: contain; background: #020617; }
-    .product { display: grid; grid-template-columns: 96px 1fr; gap: 14px; align-items: start; }
-    .product img { width: 96px; height: 96px; object-fit: cover; }
-    .muted { color: #94a3b8; font-size: 14px; }
-    .price { color: #a7f3d0; font-weight: 900; }
-    .advice-block { margin: 12px 0; padding: 12px; border: 1px solid #334155; border-radius: 12px; background: #020617; }
-    .advice-block h3 { margin: 0 0 8px; }
-    a { color: #93c5fd; }
-    pre { white-space: pre-wrap; overflow: auto; background: #020617; padding: 12px; border-radius: 12px; }
-    .hidden { display: none; }
-  </style>
+  <link rel="stylesheet" href="/static/css/runner.css" />
 </head>
 <body>
   <main>
@@ -104,8 +86,19 @@ async def room_upgrade_runner():
             <input id="budget" name="budget" type="number" min="0" step="1" placeholder="500" />
           </div>
           <div class="field">
-            <label for="dimensions_sqm">Approx. size (m²)</label>
-            <input id="dimensions_sqm" name="dimensions_sqm" type="number" min="0" step="1" placeholder="25" />
+            <label for="unit_system">Units</label>
+            <select id="unit_system" name="unit_system">
+              <option value="metric" selected>Metric (m / cm)</option>
+              <option value="imperial">Imperial (ft / in)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="yard_length">Yard length</label>
+            <input id="yard_length" name="yard_length" type="number" min="0" step="0.1" placeholder="5" />
+          </div>
+          <div class="field">
+            <label for="yard_width">Yard width</label>
+            <input id="yard_width" name="yard_width" type="number" min="0" step="0.1" placeholder="5" />
           </div>
           <div class="field">
             <label for="city_or_region">City / region</label>
@@ -143,14 +136,14 @@ async def room_upgrade_runner():
             </select>
           </div>
           <div class="field">
-            <label for="environment_type">Environment</label>
-            <select id="environment_type" name="environment_type">
+            <label for="setting">Setting</label>
+            <select id="setting" name="setting">
               <option value="">Not sure</option>
-              <option value="coastal">Coastal</option>
+              <option value="coastal_exposed">Coastal / exposed</option>
               <option value="suburban">Suburban</option>
-              <option value="urban">Urban</option>
-              <option value="rural">Rural</option>
-              <option value="mountain">Mountain</option>
+              <option value="urban">Urban / city</option>
+              <option value="rural">Rural / countryside</option>
+              <option value="mountain">Mountain / high altitude</option>
             </select>
           </div>
           <div class="field">
@@ -235,6 +228,26 @@ async def room_upgrade_runner():
         <div id="advice"></div>
       </div>
 
+      <div id="locationCard" class="card location-card hidden">
+        <h2>Location Profile</h2>
+        <div id="locationProfile" class="location-grid">
+          <div class="location-section">
+            <div class="location-hero">
+              <span class="location-city" id="loc-city">-</span>
+              <span class="location-country" id="loc-country">-</span>
+            </div>
+            <div class="location-tags" id="loc-tags"></div>
+          </div>
+          <div class="location-stats" id="loc-stats"></div>
+          <div class="location-summaries" id="loc-summaries"></div>
+        </div>
+      </div>
+
+      <div id="plantSpecCard" class="card plant-spec-card hidden">
+        <h2>Plant Specification</h2>
+        <div id="plantSpec" class="plant-list"></div>
+      </div>
+
       <div class="card">
         <h2>Products</h2>
         <div id="products"></div>
@@ -247,166 +260,7 @@ async def room_upgrade_runner():
     </section>
   </main>
 
-  <script>
-    const form = document.getElementById('runnerForm');
-    const statusEl = document.getElementById('status');
-    const runButton = document.getElementById('runButton');
-    const resultsEl = document.getElementById('results');
-
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const imageFile = document.getElementById('image').files[0];
-      const prompt = document.getElementById('prompt').value.trim();
-      if (!imageFile) return;
-
-      runButton.disabled = true;
-      resultsEl.classList.add('hidden');
-      document.getElementById('beforeImage').src = URL.createObjectURL(imageFile);
-
-      try {
-        statusEl.textContent = 'Analyzing photo, inferring budget, and finding products...';
-        const formData = new FormData();
-        formData.append('image', imageFile);
-        formData.append('prompt', prompt);
-        formData.append('currency', 'USD');
-        appendOptionalField(formData, 'budget');
-        appendOptionalField(formData, 'dimensions_sqm');
-        appendOptionalField(formData, 'city_or_region');
-        appendOptionalField(formData, 'orientation');
-        appendOptionalField(formData, 'surface_type');
-        appendOptionalField(formData, 'slope');
-        appendOptionalField(formData, 'environment_type');
-        appendOptionalField(formData, 'primary_purpose');
-        appendOptionalField(formData, 'maintenance');
-        appendOptionalField(formData, 'style_preference');
-        appendOptionalField(formData, 'ownership');
-        const whoUses = Array.from(document.querySelectorAll('input[name="who_uses"]:checked'))
-          .map((input) => input.value);
-        if (whoUses.length) formData.append('who_uses', whoUses.join(','));
-
-        const analyzeResponse = await fetch('/api/v1/room-upgrade/analyze/upload', {
-          method: 'POST',
-          body: formData,
-        });
-        if (!analyzeResponse.ok) throw new Error(await analyzeResponse.text());
-        const analyze = await analyzeResponse.json();
-
-        statusEl.textContent = 'Generating after image with selected products...';
-        const imageBase64 = await fileToBase64(imageFile);
-        const generateResponse = await fetch('/api/v1/room-upgrade/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            image_base64: imageBase64,
-            prompt,
-            scene_analysis: analyze.scene_analysis,
-            selected_products: analyze.selected_products,
-          }),
-        });
-        if (!generateResponse.ok) throw new Error(await generateResponse.text());
-        const generate = await generateResponse.json();
-
-        renderResults(analyze, generate);
-        statusEl.textContent = 'Done.';
-      } catch (error) {
-        console.error(error);
-        statusEl.textContent = `Error: ${error.message || error}`;
-      } finally {
-        runButton.disabled = false;
-      }
-    });
-
-    function renderResults(analyze, generate) {
-      document.getElementById('afterImage').src = generate.after_image_url || '';
-      document.getElementById('budgetSummary').textContent =
-        `AI budget: $${Number(analyze.budget || 0).toFixed(2)} | Selected total: $${Number(analyze.total_estimated || 0).toFixed(2)}`;
-      document.getElementById('generatedPrompt').textContent = generate.prompt_used || '';
-
-      const productsEl = document.getElementById('products');
-      productsEl.innerHTML = '';
-      renderAdvice(analyze.design_advice);
-      for (const selected of analyze.selected_products || []) {
-        const product = selected.chosen_product;
-        const attrs = [
-          product.brand && `Brand: ${product.brand}`,
-          product.material && `Material: ${product.material}`,
-          product.color && `Color: ${product.color}`,
-          product.dimensions && `Dimensions: ${product.dimensions}`,
-          product.rating && `Rating: ${product.rating}`,
-          product.review_count && `Reviews: ${product.review_count}`,
-        ].filter(Boolean).join(' · ');
-        const div = document.createElement('div');
-        div.className = 'product card';
-        div.innerHTML = `
-          <img src="${escapeAttr(product.image_url || '')}" alt="" />
-          <div>
-            <h3>${escapeHtml(product.title || 'Product')}</h3>
-            <p><span class="price">$${Number(product.price || 0).toFixed(2)}</span> at ${escapeHtml(product.store || '')}</p>
-            <p class="muted">${escapeHtml(attrs || 'No extra attributes returned.')}</p>
-            <p>${escapeHtml(product.detailed_description || product.description || '')}</p>
-            <p><a href="${escapeAttr(product.buy_link || '#')}" target="_blank" rel="noreferrer">Open merchant link</a></p>
-          </div>
-        `;
-        productsEl.appendChild(div);
-      }
-      resultsEl.classList.remove('hidden');
-    }
-
-    function renderAdvice(advice) {
-      const adviceCard = document.getElementById('adviceCard');
-      const adviceEl = document.getElementById('advice');
-      adviceEl.innerHTML = '';
-
-      if (!advice) {
-        adviceCard.classList.add('hidden');
-        return;
-      }
-
-      const blocks = [];
-      if (advice.space_assessment?.summary) {
-        blocks.push(`<div class="advice-block"><h3>Space assessment</h3><p>${escapeHtml(advice.space_assessment.summary)}</p></div>`);
-      }
-      if (advice.design_approach?.strategy) {
-        blocks.push(`<div class="advice-block"><h3>Design approach</h3><p>${escapeHtml(advice.design_approach.strategy)}</p><p class="muted">${escapeHtml(advice.design_approach.reasoning || '')}</p></div>`);
-      }
-      if (advice.key_constraints?.length) {
-        blocks.push(`<div class="advice-block"><h3>Key constraints</h3>${advice.key_constraints.map((item) => `<p><strong>${escapeHtml(item.title || '')}</strong><br />${escapeHtml(item.explanation || '')}<br /><span class="muted">${escapeHtml(item.user_action || '')}</span></p>`).join('')}</div>`);
-      }
-      if (advice.action_plan?.length) {
-        blocks.push(`<div class="advice-block"><h3>Action plan</h3><ol>${advice.action_plan.map((item) => `<li><strong>${escapeHtml(item.action || '')}</strong><br />${escapeHtml(item.detail || '')}<br /><span class="muted">${escapeHtml(item.reasoning || '')}</span></li>`).join('')}</ol></div>`);
-      }
-      if (advice.warnings?.length) {
-        blocks.push(`<div class="advice-block"><h3>Warnings</h3>${advice.warnings.map((item) => `<p><strong>${escapeHtml(item.title || '')}</strong>: ${escapeHtml(item.message || '')}</p>`).join('')}</div>`);
-      }
-
-      adviceEl.innerHTML = blocks.join('');
-      adviceCard.classList.toggle('hidden', blocks.length === 0);
-    }
-
-    function appendOptionalField(formData, id) {
-      const value = document.getElementById(id)?.value?.trim();
-      if (value) formData.append(id, value);
-    }
-
-    function fileToBase64(file) {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result).split(',')[1]);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-    }
-
-    function escapeHtml(value) {
-      return String(value).replace(/[&<>"']/g, (char) => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
-      }[char]));
-    }
-
-    function escapeAttr(value) {
-      return escapeHtml(value).replace(/`/g, '&#096;');
-    }
-  </script>
+  <script src="/static/js/runner.js"></script>
 </body>
 </html>
         """
@@ -480,11 +334,15 @@ async def analyze_room_upgrade_upload(
     currency: str = Form("USD"),
     image: UploadFile = File(...),
     # Optional yard design inputs
+    unit_system: Optional[str] = Form(None),
+    yard_length: Optional[float] = Form(None),
+    yard_width: Optional[float] = Form(None),
     dimensions_sqm: Optional[float] = Form(None),
     orientation: Optional[str] = Form(None),
     surface_type: Optional[str] = Form(None),
     slope: Optional[str] = Form(None),
     city_or_region: Optional[str] = Form(None),
+    city_context: Optional[str] = Form(None),
     environment_type: Optional[str] = Form(None),
     primary_purpose: Optional[str] = Form(None),
     who_uses: Optional[str] = Form(None),  # Comma-separated list
@@ -503,14 +361,34 @@ async def analyze_room_upgrade_upload(
     who_uses_list = None
     if who_uses:
         who_uses_list = [w.strip() for w in who_uses.split(",") if w.strip()]
+
+    # Compute sqm from yard length×width (if provided)
+    computed_sqm = None
+    if yard_length is not None and yard_width is not None and yard_length > 0 and yard_width > 0:
+        unit = (unit_system or "metric").strip().lower()
+        if unit == "imperial":
+            # Inputs are in feet; convert to meters
+            length_m = float(yard_length) * 0.3048
+            width_m = float(yard_width) * 0.3048
+        else:
+            # Default to metric meters
+            length_m = float(yard_length)
+            width_m = float(yard_width)
+        computed_sqm = max(0.0, length_m * width_m)
+        if dimensions_sqm is None:
+            dimensions_sqm = computed_sqm
     
     # Build yard inputs if any were provided
     yard_inputs = YardInputs(
+        unit_system=unit_system,
+        yard_length=yard_length,
+        yard_width=yard_width,
         dimensions_sqm=dimensions_sqm,
         orientation=orientation,
         surface_type=surface_type,
         slope=slope,
         city_or_region=city_or_region,
+        city_context=city_context,
         environment_type=environment_type,
         primary_purpose=primary_purpose,
         who_uses=who_uses_list,
@@ -560,6 +438,11 @@ async def analyze_room_upgrade_with_advice(
         )
 
         design_advice = None
+        location_profile_model = None
+        plant_spec = None
+        site_palette_text = None
+        override_chunk_ids: Optional[List[str]] = None
+        dynamic_chunks: Optional[List[Dict[str, Any]]] = None
         from ..services.scenario_context_service import scenario_context_service
 
         if scenario_context_service.has_inputs(yard_inputs):
@@ -569,14 +452,88 @@ async def analyze_room_upgrade_with_advice(
                 if hasattr(scene_analysis, "model_dump")
                 else scene_analysis.dict()
             )
+            location_profile_dict = None
+
+            if yard_inputs.city_or_region:
+                ctx = None
+                if yard_inputs.city_context in {"coastal", "inland", "unknown"}:
+                    try:
+                        ctx = CityContext(yard_inputs.city_context)
+                    except Exception:
+                        ctx = None
+
+                location_profile_model = await location_intelligence_service.get_location_profile(
+                    city_or_region=yard_inputs.city_or_region,
+                    city_context=ctx,
+                )
+                location_profile_dict = (
+                    location_profile_model.model_dump()
+                    if hasattr(location_profile_model, "model_dump")
+                    else location_profile_model.dict()
+                )
+                # The override helper expects `solar_lighting_viable` but the profile schema uses
+                # `solar_lighting_viability`. Provide the expected key for chunk lookups.
+                if (
+                    "solar_lighting_viable" not in location_profile_dict
+                    and "solar_lighting_viability" in location_profile_dict
+                ):
+                    location_profile_dict["solar_lighting_viable"] = location_profile_dict.get(
+                        "solar_lighting_viability"
+                    )
+                override_chunk_ids = get_climate_override_chunks(location_profile_dict)
+                site_palette_text = location_intelligence_service.build_site_palette_text(
+                    location_profile_model
+                )
+                dynamic_chunks = [
+                    {
+                        "id": "2.4.site_palette",
+                        "module": "2.4",
+                        "title": f"Site Plant Palette — {location_profile_model.city}",
+                        "priority": 12,
+                        "tags": ["plants", "palette", "location", "dynamic"],
+                        "content": site_palette_text,
+                    }
+                ]
+
             advice_raw = await yard_advisor_service.generate_design_advice(
                 yard_inputs,
                 photo_analysis=photo_analysis,
+                location_profile=location_profile_dict,
+                site_palette=site_palette_text,
+                override_chunk_ids=override_chunk_ids,
+                dynamic_chunks=dynamic_chunks,
             )
             design_advice = _parse_advice_to_model(advice_raw)
 
             if design_advice is not None:
                 _apply_advice_to_shopping_list(scene_analysis, design_advice)
+
+            if (
+                site_palette_text
+                and (yard_inputs.style_preference or yard_inputs.primary_purpose)
+                and location_profile_dict is not None
+            ):
+                user_inputs_dict: Dict[str, Any] = {
+                    "city_or_region": yard_inputs.city_or_region,
+                    "unit_system": yard_inputs.unit_system,
+                    "yard_length": yard_inputs.yard_length,
+                    "yard_width": yard_inputs.yard_width,
+                    "dimensions_sqm": yard_inputs.dimensions_sqm,
+                    "orientation": yard_inputs.orientation,
+                    "surface_type": yard_inputs.surface_type,
+                    "style_preference": yard_inputs.style_preference,
+                    "primary_purpose": yard_inputs.primary_purpose,
+                    "who_uses": yard_inputs.who_uses or [],
+                    "maintenance": yard_inputs.maintenance,
+                    "budget": yard_inputs.budget,
+                    "allergies": "",
+                    "pets": "",
+                }
+                plant_spec = await plant_spec_service.generate_plant_spec(
+                    site_palette=site_palette_text,
+                    user_inputs=user_inputs_dict,
+                    location_profile=location_profile_dict,
+                )
 
         search_results = await asyncio.gather(
             *[
@@ -596,8 +553,20 @@ async def analyze_room_upgrade_with_advice(
             selected_products
         )
 
+        # Normalize product dimensions to user's chosen unit system (for UI + Gemini prompt consistency)
+        unit_system = (yard_inputs.unit_system or "metric").strip().lower()
+        for selected in selected_products:
+            product = selected.chosen_product
+            product.dimensions = normalize_dimensions_string(
+                product.dimensions,
+                unit_system=unit_system,
+                kind="product",
+            )
+
         return YardUpgradeAnalyzeResponse(
             design_advice=design_advice,
+            location_profile=location_profile_model,
+            plant_spec=plant_spec,
             scene_analysis=scene_analysis,
             search_results=search_results,
             selected_products=selected_products,
@@ -782,6 +751,44 @@ async def search_products_for_upgrade(request: RoomUpgradeSearchRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.post("/plant-images")
+async def get_plant_images(payload: Dict[str, Any] = Body(...)):
+    """
+    Batch plant image lookup endpoint.
+
+    Expected request JSON:
+      { "plants": [ { "key": "...", "botanical_name": "...", "common_name": "..." }, ... ] }
+
+    Response:
+      { "images": { "<key>": "<url or empty string>" } }
+    """
+    try:
+        plants = (payload or {}).get("plants") if isinstance(payload, dict) else None
+        if not isinstance(plants, list):
+            raise HTTPException(status_code=400, detail="Invalid payload: expected {plants: []}.")
+
+        results: Dict[str, str] = {}
+        for item in plants[:30]:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("key") or "").strip()
+            if not key:
+                continue
+            botanical = str(item.get("botanical_name") or "").strip()
+            common = str(item.get("common_name") or "").strip()
+            url = await plant_image_service.get_plant_image_url(
+                botanical_name=botanical,
+                common_name=common,
+            )
+            results[key] = url or ""
+
+        return {"images": results}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.post("/generate", response_model=RoomUpgradeGenerateResponse)
 async def generate_room_upgrade(request: RoomUpgradeGenerateRequest):
     """
@@ -880,6 +887,35 @@ async def fetch_product_images(
     return [img for img in results if img is not None]
 
 
+def _extract_plant_names(plant_spec: Optional[str]) -> List[tuple]:
+    """
+    Parse plant_spec text and extract plant names.
+    
+    Returns list of tuples: [(botanical_name, common_name), ...]
+    """
+    if not plant_spec:
+        return []
+    
+    import re
+    plants = []
+    
+    # Find all botanical names and common names
+    botanical_pattern = r"Botanical name:\s*(.+?)(?:\n|$)"
+    common_pattern = r"Common name:\s*(.+?)(?:\n|$)"
+    
+    botanical_matches = re.findall(botanical_pattern, plant_spec, re.IGNORECASE)
+    common_matches = re.findall(common_pattern, plant_spec, re.IGNORECASE)
+    
+    # Pair them up (they should appear in order)
+    for i in range(max(len(botanical_matches), len(common_matches))):
+        botanical = botanical_matches[i].strip() if i < len(botanical_matches) else ""
+        common = common_matches[i].strip() if i < len(common_matches) else ""
+        if botanical or common:
+            plants.append((botanical, common))
+    
+    return plants
+
+
 def build_room_upgrade_prompt_v2(
     request: RoomUpgradeGenerateRequest,
     num_product_images: int,
@@ -889,6 +925,30 @@ def build_room_upgrade_prompt_v2(
     Image 1 = room photo, Images 2-N = product photos.
     """
     item_descriptions = []
+    raw_unit_system = request.unit_system
+    if raw_unit_system is None:
+        unit_system = "metric"
+    else:
+        unit_system = str(getattr(raw_unit_system, "value", raw_unit_system)).strip().lower()
+
+    yard_dims = format_yard_dimensions(
+        yard_length=request.yard_length,
+        yard_width=request.yard_width,
+        unit_system=unit_system,
+    )
+    yard_area = format_area(
+        area_sqm=compute_area_sqm(
+            yard_length=request.yard_length,
+            yard_width=request.yard_width,
+            unit_system=unit_system,
+        ),
+        unit_system=unit_system,
+    )
+    space_dims_line = ""
+    if yard_dims:
+        space_dims_line = f"\nSpace dimensions: {yard_dims}"
+        if yard_area:
+            space_dims_line += f" (approx. {yard_area})"
 
     for index, selected in enumerate(request.selected_products, start=1):
         product = selected.chosen_product
@@ -900,8 +960,13 @@ def build_room_upgrade_prompt_v2(
             details.append(f"made of {product.material}")
         if product.color:
             details.append(f"in {product.color}")
-        if product.dimensions:
-            details.append(f"size: {product.dimensions}")
+        normalized_dims = normalize_dimensions_string(
+            product.dimensions,
+            unit_system=unit_system,
+            kind="product",
+        )
+        if normalized_dims:
+            details.append(f"size: {normalized_dims}")
 
         detail_str = f" ({', '.join(details)})" if details else ""
 
@@ -920,31 +985,44 @@ def build_room_upgrade_prompt_v2(
 
     user_prompt = f"\nUser request: {request.prompt}" if request.prompt else ""
 
+    # Extract and format plant names if plant_spec is provided
+    plants = _extract_plant_names(getattr(request, 'plant_spec', None))
+    plants_section = ""
+    plants_rule = ""
+    if plants:
+        plant_lines = []
+        for botanical, common in plants:
+            if botanical and common:
+                plant_lines.append(f"- {common} ({botanical})")
+            elif common:
+                plant_lines.append(f"- {common}")
+            elif botanical:
+                plant_lines.append(f"- {botanical}")
+        if plant_lines:
+            plants_section = "\n\nPlants to include in the garden design:\n" + "\n".join(plant_lines)
+            plants_rule = "\n9. Include the specified plants naturally in appropriate locations - along borders, near seating areas, or as focal points"
+
     # If we have product images, use multi-image prompt
     if num_product_images > 0:
-        return f"""You are editing Image 1 (the room/outdoor space photo).{user_prompt}
+        return f"""You are editing Image 1 (the room/outdoor space photo).{user_prompt}{space_dims_line}
 
 I am providing {num_product_images} product reference images (Images 2-{num_product_images + 1}).
 You MUST add these EXACT products to the scene - use their appearance from the reference images.
 
 Products to add:
 
-{chr(10).join(item_descriptions)}
+{chr(10).join(item_descriptions)}{plants_section}
 
 CRITICAL RULES:
 1. DO NOT change the camera angle, perspective, or viewpoint - keep EXACTLY the same view as the original photo
-2. DO NOT regenerate or reimagine the space - ONLY add products to the existing photo
-3. DO NOT add, replace, expand, or redesign any floor surface: no floor tiles, pavers, patio slabs, deck boards, concrete, gravel, rugs, or hardscape unless that exact product is listed
-4. DO NOT replace grass with tiles or patio flooring. If there is grass in the original photo, it must remain grass
-5. DO NOT add new pergolas, roofs, beams, walls, fences, pathways, raised beds, or landscaping structures
-6. Use the EXACT visual appearance of each product from its reference image
-7. Products must be CLEARLY VISIBLE in the final image - not subtle or hidden
-8. Scale products appropriately for the existing visible surface; do not create a new support surface for them
-9. Match lighting and shadows to the room
-10. Place products naturally but prominently where specified
-11. Preserve EVERYTHING in the original photo - walls, floors, grass, plants, furniture, architecture
-12. NO labels, watermarks, text overlays, or price tags
-13. The output should look like the SAME photo with products added, not a new photo
+2. Use the EXACT visual appearance of each product from its reference image
+3. Products must be CLEARLY VISIBLE in the final image - not subtle or hidden
+4. Match lighting and shadows to the room
+5. Place products naturally but prominently where specified
+6. Preserve EVERYTHING in the original photo - walls, floors, grass, plants, furniture, architecture
+7. NO labels, watermarks, text overlays, or price tags
+8. The output should look like the SAME photo with products added, not a new photo
+9. NEVER place rugs, carpets, or mats on grass, soil, or natural ground - they only belong on hard surfaces (deck, patio, concrete){plants_rule}
 
 The space is a {request.scene_analysis.space_type}.
 Current style: {request.scene_analysis.style_observation}
@@ -952,11 +1030,12 @@ Current style: {request.scene_analysis.style_observation}
 Generate the edited image now. Keep the EXACT same photo, just add the products."""
 
     # Fallback text-only prompt (when no product images available)
-    return f"""You are editing the provided room or outdoor space photo.{user_prompt}
+    plants_rule_text = "\n- Include the specified plants naturally in appropriate locations - along borders, near seating areas, or as focal points" if plants else ""
+    return f"""You are editing the provided room or outdoor space photo.{user_prompt}{space_dims_line}
 
 Add the following products to the photo naturally:
 
-{chr(10).join(item_descriptions)}
+{chr(10).join(item_descriptions)}{plants_section}
 
 CRITICAL RULES:
 - DO NOT change the camera angle, perspective, or viewpoint - keep EXACTLY the same view
@@ -964,12 +1043,13 @@ CRITICAL RULES:
 - DO NOT add, replace, expand, or redesign any floor surface: no floor tiles, pavers, patio slabs, deck boards, concrete, gravel, rugs, or hardscape unless that exact product is listed
 - DO NOT replace grass with tiles or patio flooring. If there is grass in the original photo, it must remain grass
 - DO NOT add new pergolas, roofs, beams, walls, fences, pathways, raised beds, or landscaping structures
+- NEVER place rugs, carpets, or mats on grass, soil, or natural ground - they only belong on hard surfaces (deck, patio, concrete)
 - Make products CLEARLY VISIBLE - they should be prominent in the scene
 - Preserve EVERYTHING in the original photo - walls, floors, plants, furniture, architecture
 - Match lighting direction and shadows
 - Products should look physically present, not pasted
 - No labels, watermarks, or text
-- The output should look like the SAME photo with products added, not a new photo
+- The output should look like the SAME photo with products added, not a new photo{plants_rule_text}
 
 The space is a {request.scene_analysis.space_type}.
 Style: {request.scene_analysis.style_observation}
