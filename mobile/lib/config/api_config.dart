@@ -1,7 +1,7 @@
 /// API Configuration for ReimagineAI
 class ApiConfig {
   // Your computer's IP - change this if your IP changes
-  static const String baseUrl = 'http://192.168.100.25:8000';
+  static const String baseUrl = 'http://127.0.0.1:8100';
   
   static const String apiVersion = '/api/v1';
   

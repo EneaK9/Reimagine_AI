@@ -29,6 +29,15 @@ class AppTheme {
   // Border Colors
   static const Color border = Color(0xFFE8E3DB);
   static const Color borderLight = Color(0xFFF0ECE4);
+
+  // Auth (monochrome) palette - used on login/signup screens
+  static const Color ink = Color(0xFF101010);
+  static const Color authFieldFill = Color(0xFFF4F4F6);
+  static const Color authBorder = Color(0xFFE5E5EA);
+  static const Color authMuted = Color(0xFF6F6F78);
+  static const double authFieldRadius = 10;
+  static const double authButtonRadius = 12;
+  static const double authPanelRadius = 28;
   
   // Legacy dark colors (for compatibility during transition)
   static const Color cardDark = Color(0xFFFFFFFF);
