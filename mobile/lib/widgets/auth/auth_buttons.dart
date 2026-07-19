@@ -25,6 +25,8 @@ class PrimaryAuthButton extends StatelessWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: AppTheme.ink,
           foregroundColor: Colors.white,
+          // White overlay so hover visibly lightens the black button.
+          overlayColor: Colors.white,
           disabledBackgroundColor: AppTheme.ink.withValues(alpha: 0.6),
           disabledForegroundColor: Colors.white70,
           elevation: 0,
@@ -79,6 +81,7 @@ class OutlinedAuthButton extends StatelessWidget {
         style: OutlinedButton.styleFrom(
           foregroundColor: AppTheme.ink,
           backgroundColor: Colors.white,
+          overlayColor: AppTheme.overlayBase,
           side: const BorderSide(color: AppTheme.authBorder),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppTheme.authButtonRadius),

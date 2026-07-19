@@ -180,6 +180,7 @@ class _LoginFormState extends State<LoginForm> {
             padding: EdgeInsets.zero,
             minimumSize: Size.zero,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            overlayColor: Colors.transparent,
           ),
           child: Text(
             'Forgot Password',
@@ -239,6 +240,7 @@ class _LoginFormState extends State<LoginForm> {
             padding: EdgeInsets.zero,
             minimumSize: Size.zero,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            overlayColor: Colors.transparent,
           ),
           child: Text(
             'Sign Up',
@@ -262,6 +264,7 @@ class _LoginFormState extends State<LoginForm> {
             MaterialPageRoute(builder: (_) => const ChatScreen()),
           );
         },
+        style: TextButton.styleFrom(overlayColor: Colors.transparent),
         child: Text(
           'Skip for now →',
           style: GoogleFonts.dmSans(

@@ -38,6 +38,11 @@ class AppTheme {
   static const double authFieldRadius = 10;
   static const double authButtonRadius = 12;
   static const double authPanelRadius = 28;
+
+  // Interaction overlays - neutral gray for hover/focus/press everywhere
+  static const Color overlayBase = Color(0xFF8E8E93);
+  static const Color hoverGray = Color(0x148E8E93);   // ~8% gray
+  static const Color pressGray = Color(0x1F8E8E93);   // ~12% gray
   
   // Legacy dark colors (for compatibility during transition)
   static const Color cardDark = Color(0xFFFFFFFF);
@@ -86,6 +91,11 @@ class AppTheme {
     brightness: Brightness.light,
     scaffoldBackgroundColor: background,
     primaryColor: primaryColor,
+    // Neutral gray interaction states (instead of tinted orange/yellow)
+    hoverColor: hoverGray,
+    focusColor: hoverGray,
+    highlightColor: pressGray,
+    splashColor: pressGray,
     colorScheme: const ColorScheme.light(
       primary: primaryColor,
       secondary: primaryLight,
@@ -222,6 +232,7 @@ class AppTheme {
       style: ElevatedButton.styleFrom(
         backgroundColor: primaryColor,
         foregroundColor: Colors.white,
+        overlayColor: overlayBase,
         elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
         shape: RoundedRectangleBorder(
@@ -238,6 +249,7 @@ class AppTheme {
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         foregroundColor: primaryColor,
+        overlayColor: overlayBase,
         side: const BorderSide(color: primaryColor, width: 1.5),
         padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
         shape: RoundedRectangleBorder(
@@ -254,6 +266,7 @@ class AppTheme {
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
         foregroundColor: primaryColor,
+        overlayColor: overlayBase,
         textStyle: GoogleFonts.dmSans(
           fontSize: 14,
           fontWeight: FontWeight.w600,
@@ -265,6 +278,7 @@ class AppTheme {
     iconButtonTheme: IconButtonThemeData(
       style: IconButton.styleFrom(
         foregroundColor: textPrimary,
+        overlayColor: overlayBase,
       ),
     ),
     
@@ -301,6 +315,11 @@ class AppTheme {
       ),
     ),
     
+    // Checkbox
+    checkboxTheme: const CheckboxThemeData(
+      overlayColor: WidgetStatePropertyAll(hoverGray),
+    ),
+
     // Switch
     switchTheme: SwitchThemeData(
       thumbColor: WidgetStateProperty.resolveWith((states) {

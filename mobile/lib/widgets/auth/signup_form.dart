@@ -298,6 +298,7 @@ class _SignupFormState extends State<SignupForm> {
             padding: EdgeInsets.zero,
             minimumSize: Size.zero,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            overlayColor: Colors.transparent,
           ),
           child: Text(
             'Sign In',
