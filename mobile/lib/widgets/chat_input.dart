@@ -7,6 +7,8 @@ import 'platform_image.dart';
 
 /// Compact LUXE-styled composer for the design studio.
 class ChatInput extends StatefulWidget {
+  static const double _controlSize = 42;
+  static const double _controlRadius = 8;
   final Function(String message) onSend;
   final Function(File image) onImageSelected;
   final File? selectedImage;
@@ -242,7 +244,7 @@ class ChatInputState extends State<ChatInput> {
             const SizedBox(height: 10),
           ],
           Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               _SquareBtn(
                 icon: Icons.add_photo_alternate_outlined,
@@ -251,38 +253,56 @@ class ChatInputState extends State<ChatInput> {
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: AppTheme.background,
-                    border: Border.all(color: AppTheme.border),
-                  ),
-                  child: TextField(
-                    controller: _controller,
-                    focusNode: _focusNode,
-                    enabled: !widget.isLoading,
-                    maxLines: 4,
-                    minLines: 1,
-                    textCapitalization: TextCapitalization.sentences,
-                    style: GoogleFonts.interTight(
-                      color: AppTheme.ink,
-                      fontSize: 14,
+                child: SizedBox(
+                  height: ChatInput._controlSize,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: AppTheme.background,
+                      border: Border.all(color: AppTheme.border),
+                      borderRadius:
+                          BorderRadius.circular(ChatInput._controlRadius),
                     ),
-                    decoration: InputDecoration(
-                      hintText: hint,
-                      hintStyle: GoogleFonts.interTight(
-                        color: AppTheme.textMuted,
-                        fontSize: 14,
-                      ),
-                      filled: true,
-                      fillColor: Colors.transparent,
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 12,
+                    child: ClipRRect(
+                      borderRadius:
+                          BorderRadius.circular(ChatInput._controlRadius),
+                      child: TextField(
+                        controller: _controller,
+                        focusNode: _focusNode,
+                        enabled: !widget.isLoading,
+                        maxLines: 1,
+                        textAlignVertical: TextAlignVertical.center,
+                        textCapitalization: TextCapitalization.sentences,
+                        style: GoogleFonts.interTight(
+                          color: AppTheme.ink,
+                          fontSize: 14,
+                          height: 1.2,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: hint,
+                          hintStyle: GoogleFonts.interTight(
+                            color: AppTheme.textMuted,
+                            fontSize: 14,
+                            height: 1.2,
+                          ),
+                          isDense: true,
+                          filled: true,
+                          fillColor: Colors.transparent,
+                          // Override theme OutlineInputBorder (radius 16)
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          disabledBorder: InputBorder.none,
+                          errorBorder: InputBorder.none,
+                          focusedErrorBorder: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 0,
+                          ),
+                        ),
+                        onChanged: (_) => setState(() {}),
+                        onSubmitted: (_) => _sendMessage(),
                       ),
                     ),
-                    onChanged: (_) => setState(() {}),
-                    onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
               ),
@@ -320,13 +340,14 @@ class _SquareBtn extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 140),
-        width: 42,
-        height: 42,
+        width: ChatInput._controlSize,
+        height: ChatInput._controlSize,
         decoration: BoxDecoration(
           color: emphasized ? AppTheme.primaryColor : AppTheme.background,
           border: Border.all(
             color: emphasized ? AppTheme.primaryColor : AppTheme.border,
           ),
+          borderRadius: BorderRadius.circular(ChatInput._controlRadius),
         ),
         child: loading
             ? Padding(

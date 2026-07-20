@@ -47,12 +47,17 @@ async def send_message(request: ChatRequest):
             image_to_edit = request.image_base64
             conversation_service.store_original_image(conversation.id, request.image_base64)
         else:
-            # No new image - check if we have a previous generated image to edit
+            # Prefer last generated edit; fall back to the original upload
             last_image = conversation_service.get_last_generated_image(conversation.id)
+            original_image = conversation_service.get_original_image(conversation.id)
             if last_image:
                 image_to_edit = last_image
                 is_follow_up = True
-                print(f"Using last generated image for follow-up edit")
+                print("Using last generated image for follow-up edit")
+            elif original_image:
+                image_to_edit = original_image
+                is_follow_up = True
+                print("Using original uploaded image for follow-up edit")
         
         # Add user message to conversation (save actual image data URL if uploaded)
         user_image_url = None
@@ -80,26 +85,49 @@ async def send_message(request: ChatRequest):
         
         # Check if we should generate/edit images
         generated_images = []
+        image_error_note = None
         image_prompt = openai_service.extract_image_prompt(ai_response)
+        wants_edit = (
+            image_prompt
+            or _is_edit_request(request.message)
+            or (is_follow_up and _is_affirmative(request.message))
+        )
         
         # Generate images if we have an image to edit AND user is requesting changes
-        if image_to_edit and (image_prompt or _is_edit_request(request.message)):
+        if image_to_edit and wants_edit:
             try:
                 style = _extract_style_from_prompt(ai_response)
                 
-                # Use the user's EXACT request for precise edits
+                # Prefer a concrete edit instruction from the prompt / last user ask
                 edit_instruction = request.message
+                if _is_affirmative(request.message) and image_prompt:
+                    edit_instruction = image_prompt
+                elif _is_affirmative(request.message):
+                    edit_instruction = _last_user_edit_request(context_messages) or request.message
                 
                 generated_images = await gemini_service.edit_room(
                     image_base64=image_to_edit,
                     edit_instruction=edit_instruction,
                     style=style,
                 )
+                if not generated_images:
+                    image_error_note = (
+                        "I understood the change, but image editing didn’t return a result "
+                        "(the image model may be rate-limited or out of quota). "
+                        "Please try again in a minute, or check your Gemini API billing/quota."
+                    )
                 
             except Exception as img_error:
                 print(f"Image generation failed: {img_error}")
                 import traceback
                 traceback.print_exc()
+                image_error_note = (
+                    f"I couldn’t update the image right now: {_friendly_image_error(img_error)}"
+                )
+        
+        # Append a visible note when generation was expected but failed
+        if image_error_note:
+            ai_response = f"{ai_response}\n\n⚠️ {image_error_note}"
         
         # Add AI response to conversation FIRST
         conversation_service.add_message(
@@ -174,11 +202,47 @@ def _is_edit_request(message: str) -> bool:
     edit_keywords = [
         "change", "make", "turn", "convert", "switch", "update",
         "paint", "color", "replace", "add", "remove", "move",
-        "walls", "floor", "ceiling", "furniture", "bed", "sofa",
-        "light", "dark", "bright", "warm", "cool", "style"
+        "walls", "wall", "floor", "ceiling", "furniture", "bed", "sofa",
+        "light", "dark", "bright", "warm", "cool", "style", "background",
     ]
     message_lower = message.lower()
     return any(keyword in message_lower for keyword in edit_keywords)
+
+
+def _is_affirmative(message: str) -> bool:
+    """Short confirmations that mean 'apply the edit we just discussed'."""
+    text = message.strip().lower()
+    affirmatives = {
+        "yes", "yeah", "yep", "yup", "ok", "okay", "sure", "please",
+        "do it", "do that", "yes do that", "go ahead", "apply it",
+        "sounds good", "yes please", "confirm",
+    }
+    if text in affirmatives:
+        return True
+    return any(text.startswith(a) for a in ("yes ", "ok ", "sure ", "please "))
+
+
+def _last_user_edit_request(context_messages: list) -> Optional[str]:
+    """Find the most recent non-affirmative user edit request in context."""
+    for msg in reversed(context_messages):
+        role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", None)
+        content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
+        if role in ("user", MessageRole.USER) and content and _is_edit_request(str(content)):
+            if not _is_affirmative(str(content)):
+                return str(content)
+    return None
+
+
+def _friendly_image_error(error: Exception) -> str:
+    text = str(error)
+    if "429" in text or "RESOURCE_EXHAUSTED" in text or "quota" in text.lower():
+        return (
+            "Gemini image quota exceeded. Enable billing or wait for the free-tier "
+            "reset, then try the edit again."
+        )
+    if "API key" in text or "not set" in text.lower():
+        return "Gemini API key is missing or invalid."
+    return "the image model failed. Please try again shortly."
 
 
 @router.post("/with-image", response_model=ChatResponse)

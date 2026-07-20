@@ -269,6 +269,14 @@ Make the edit now."""
                         
                 except Exception as e:
                     error_str = str(e)
+                    # Quota / billing — surface immediately (retries will not help)
+                    if (
+                        "429" in error_str
+                        or "RESOURCE_EXHAUSTED" in error_str
+                        or "quota" in error_str.lower()
+                    ):
+                        print(f"❌ Gemini image quota exceeded: {e}")
+                        raise
                     # Check if it's a 503 overloaded error
                     if "503" in error_str or "UNAVAILABLE" in error_str or "overloaded" in error_str.lower():
                         if attempt < max_retries - 1:
@@ -278,18 +286,20 @@ Make the edit now."""
                             continue
                         else:
                             print(f"❌ Gemini still overloaded after {max_retries} attempts")
+                            raise
                     else:
                         print(f"Gemini edit error: {e}")
-                        break
+                        raise
             
             print(f"Generated {len(results)} edited images with Gemini")
             return results
             
         except Exception as e:
+            # Re-raise so the chat router can show a user-facing note
             print(f"Gemini edit error: {e}")
             import traceback
             traceback.print_exc()
-            return []
+            raise
     
     def get_available_styles(self) -> List[dict]:
         """Get list of available design styles."""

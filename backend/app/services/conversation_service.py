@@ -222,6 +222,13 @@ class ConversationService:
         if conversation:
             conversation.original_image = image_base64
             self._save_conversation(conversation)
+
+    def get_original_image(self, conversation_id: str) -> Optional[str]:
+        """Get the original uploaded image base64 for follow-up edits."""
+        conversation = self._conversations.get(conversation_id)
+        if conversation:
+            return getattr(conversation, "original_image", None)
+        return None
     
     def store_mesh_reference(self, conversation_id: str, mesh_id: str) -> None:
         """Store the mesh ID associated with this conversation."""
