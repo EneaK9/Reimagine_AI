@@ -1,54 +1,60 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// App Theme for ReimagineAI - Warm Light Theme
-/// Inspired by modern AI interior design apps
+/// App Theme for ReimagineAI - LUXE greige / red-orange palette
 class AppTheme {
-  // Brand Colors - Warm Orange Accent
-  static const Color primaryColor = Color(0xFFF19500); // Warm Orange
-  static const Color primaryLight = Color(0xFFFFB84D);
-  static const Color primaryDark = Color(0xFFD98200);
-  
-  // Background Colors - Warm Beige/Cream
-  static const Color background = Color(0xFFF5F0E8); // Warm Cream
-  static const Color surface = Color(0xFFFFFFFF); // Pure White
-  static const Color cardColor = Color(0xFFFFFFFF);
-  static const Color inputBackground = Color(0xFFF8F4EE);
-  
+  // Brand Colors - vivid red-orange accent
+  static const Color primaryColor = Color(0xFFF2600C);
+  static const Color primaryLight = Color(0xFFF97D3C);
+  static const Color primaryDark = Color(0xFFD9530A);
+
+  // Background Colors - warm greige
+  static const Color background = Color(0xFFEFECE6);
+  static const Color surface = Color(0xFFF4F2ED);
+  static const Color cardColor = Color(0xFFF4F2ED);
+  static const Color inputBackground = Color(0xFFE9E5DE);
+  static const Color panelTone = Color(0xFFE7E3DC);
+  static const Color secondaryButton = Color(0xFFD8D4CD);
+
   // Text Colors
-  static const Color textPrimary = Color(0xFF1A1A1A);
-  static const Color textSecondary = Color(0xFF666666);
-  static const Color textMuted = Color(0xFF999999);
+  static const Color textPrimary = Color(0xFF1D1B18);
+  static const Color textSecondary = Color(0xFF5C5A55);
+  static const Color textMuted = Color(0xFF8A867E);
   static const Color textOnPrimary = Color(0xFFFFFFFF);
-  
+
   // Accent Colors
   static const Color success = Color(0xFF22C55E);
   static const Color error = Color(0xFFEF4444);
   static const Color warning = Color(0xFFF59E0B);
-  
-  // Border Colors
-  static const Color border = Color(0xFFE8E3DB);
-  static const Color borderLight = Color(0xFFF0ECE4);
 
-  // Auth (monochrome) palette - used on login/signup screens
-  static const Color ink = Color(0xFF101010);
-  static const Color authFieldFill = Color(0xFFF4F4F6);
-  static const Color authBorder = Color(0xFFE5E5EA);
-  static const Color authMuted = Color(0xFF6F6F78);
+  // Border Colors
+  static const Color border = Color(0xFFDCD7CE);
+  static const Color borderLight = Color(0xFFE7E3DC);
+
+  // Auth palette - greige family
+  static const Color ink = Color(0xFF1D1B18);
+  static const Color authFieldFill = Color(0xFFE9E5DE);
+  static const Color authBorder = Color(0xFFDCD7CE);
+  static const Color authMuted = Color(0xFF8A867E);
   static const double authFieldRadius = 10;
   static const double authButtonRadius = 12;
   static const double authPanelRadius = 28;
 
+  // Landing-only tokens
+  static const Color gridLine = Color(0xFFDBD6CD);
+  static const Color watermark = Color(0xFFCBC9C1);
+  static const Color landingAlt = Color(0xFFE1DFD8);
+
   // Interaction overlays - neutral gray for hover/focus/press everywhere
   static const Color overlayBase = Color(0xFF8E8E93);
-  static const Color hoverGray = Color(0x148E8E93);   // ~8% gray
-  static const Color pressGray = Color(0x1F8E8E93);   // ~12% gray
-  
+  static const Color hoverGray = Color(0x148E8E93); // ~8% gray
+  static const Color pressGray = Color(0x1F8E8E93); // ~12% gray
+
   // Legacy dark colors (for compatibility during transition)
-  static const Color cardDark = Color(0xFFFFFFFF);
-  static const Color surfaceDark = Color(0xFFF8F4EE);
-  static const Color backgroundDark = Color(0xFFF5F0E8);
-  
+  static const Color cardDark = Color(0xFFF4F2ED);
+  static const Color surfaceDark = Color(0xFFE9E5DE);
+  static const Color backgroundDark = Color(0xFFEFECE6);
+
   // Gradients
   static const LinearGradient primaryGradient = LinearGradient(
     colors: [primaryColor, primaryLight],
@@ -57,13 +63,13 @@ class AppTheme {
   );
 
   static const LinearGradient backgroundGradient = LinearGradient(
-    colors: [background, Color(0xFFFAF7F2)],
+    colors: [background, Color(0xFFF4F2ED)],
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
   );
-  
+
   static const LinearGradient warmGradient = LinearGradient(
-    colors: [Color(0xFFFFF8F0), Color(0xFFF5F0E8)],
+    colors: [Color(0xFFF4F2ED), Color(0xFFEFECE6)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );

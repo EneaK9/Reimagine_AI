@@ -475,7 +475,7 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
           child: Container(
             margin: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.grey.shade100,
+              color: AppTheme.inputBackground,
               borderRadius: BorderRadius.circular(20),
               boxShadow: AppTheme.cardShadow,
             ),
@@ -495,7 +495,7 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
                   maxCameraOrbit: "Infinity 180deg 3m",   // Allow full vertical rotation
                   fieldOfView: "35deg",
                   interactionPrompt: InteractionPrompt.none,  // Hide the interaction hint
-                  backgroundColor: const Color(0xFFF5F5F5),
+                  backgroundColor: AppTheme.inputBackground,
                 ),
                 // 3D badge
                 Positioned(
@@ -556,7 +556,7 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                const Icon(Icons.arrow_forward, size: 16, color: Colors.grey),
+                const Icon(Icons.arrow_forward, size: 16, color: AppTheme.textMuted),
                 const SizedBox(width: 8),
                 // Depth map thumbnail
                 Container(
@@ -564,7 +564,7 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
                   height: 64,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(8),
-                    color: Colors.grey.shade200,
+                    color: AppTheme.border,
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: Image.network(

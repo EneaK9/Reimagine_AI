@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 import '../widgets/auth/auth_art_panel.dart';
 import '../widgets/auth/login_form.dart';
 import '../widgets/auth/signup_form.dart';
@@ -27,7 +28,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.surface,
       body: LayoutBuilder(
         builder: (context, constraints) {
           final wide = constraints.maxWidth >= _artBreakpoint;

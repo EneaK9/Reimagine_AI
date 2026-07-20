@@ -1,19 +1,21 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/auth_provider.dart';
+import 'screens/landing_screen.dart';
 import 'screens/login_screen.dart';
 import 'theme/app_theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Set system UI overlay style for light theme
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.dark, // Dark icons for light background
+      statusBarIconBrightness: Brightness.dark,
       systemNavigationBarColor: AppTheme.surface,
       systemNavigationBarIconBrightness: Brightness.dark,
     ),
@@ -33,10 +35,11 @@ class ReimagineAIApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ChatProvider()),
       ],
       child: MaterialApp(
-        title: 'AI Home Designer',
+        title: 'ReimagineAI',
         debugShowCheckedModeBanner: false,
-        theme: AppTheme.lightTheme, // Use the new light theme
-        home: const LoginScreen(),
+        theme: AppTheme.lightTheme,
+        // Landing page on web; mobile builds skip straight to auth.
+        home: kIsWeb ? const LandingScreen() : const LoginScreen(),
       ),
     );
   }
