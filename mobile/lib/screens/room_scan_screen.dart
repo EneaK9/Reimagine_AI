@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
 import '../providers/chat_provider.dart';
+import '../widgets/platform_image.dart';
 import 'chat_screen.dart';
 
 /// Quick Scan Screen - Photo to 3D using depth estimation
@@ -300,8 +301,8 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
               clipBehavior: Clip.antiAlias,
               child: Stack(
                 children: [
-                  Image.file(
-                    _capturedImage!,
+                  PlatformFileImage(
+                    file: _capturedImage!,
                     fit: BoxFit.cover,
                     width: 200,
                     height: 200,
@@ -416,8 +417,8 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
               boxShadow: AppTheme.cardShadow,
             ),
             clipBehavior: Clip.antiAlias,
-            child: Image.file(
-              _capturedImage!,
+            child: PlatformFileImage(
+              file: _capturedImage!,
               fit: BoxFit.contain,
             ),
           ),
@@ -550,8 +551,8 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   clipBehavior: Clip.antiAlias,
-                  child: Image.file(
-                    _capturedImage!,
+                  child: PlatformFileImage(
+                    file: _capturedImage!,
                     fit: BoxFit.cover,
                   ),
                 ),

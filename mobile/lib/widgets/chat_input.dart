@@ -3,14 +3,16 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import '../theme/app_theme.dart';
+import 'platform_image.dart';
 
-/// Chat input widget with image attachment - Light theme design
+/// Compact LUXE-styled composer for the design studio.
 class ChatInput extends StatefulWidget {
   final Function(String message) onSend;
   final Function(File image) onImageSelected;
   final File? selectedImage;
   final VoidCallback? onClearImage;
   final bool isLoading;
+  final String? roomHint;
 
   const ChatInput({
     super.key,
@@ -19,6 +21,7 @@ class ChatInput extends StatefulWidget {
     this.selectedImage,
     this.onClearImage,
     this.isLoading = false,
+    this.roomHint,
   });
 
   @override
@@ -30,8 +33,8 @@ class ChatInputState extends State<ChatInput> {
   final FocusNode _focusNode = FocusNode();
   final ImagePicker _picker = ImagePicker();
 
-  bool get _canSend => 
-      (_controller.text.trim().isNotEmpty || widget.selectedImage != null) && 
+  bool get _canSend =>
+      (_controller.text.trim().isNotEmpty || widget.selectedImage != null) &&
       !widget.isLoading;
 
   @override
@@ -41,11 +44,24 @@ class ChatInputState extends State<ChatInput> {
     super.dispose();
   }
 
+  void setDraft(String text) {
+    _controller.text = text;
+    _controller.selection = TextSelection.fromPosition(
+      TextPosition(offset: text.length),
+    );
+    setState(() {});
+    focusField();
+  }
+
+  void focusField() {
+    _focusNode.requestFocus();
+  }
+
   void _sendMessage() {
     if (!_canSend) return;
-    
     widget.onSend(_controller.text.trim());
     _controller.clear();
+    setState(() {});
   }
 
   Future<void> _pickImage(ImageSource source) async {
@@ -56,7 +72,6 @@ class ChatInputState extends State<ChatInput> {
         maxHeight: 1920,
         imageQuality: 85,
       );
-      
       if (image != null) {
         widget.onImageSelected(File(image.path));
       }
@@ -67,9 +82,6 @@ class ChatInputState extends State<ChatInput> {
             content: Text('Error picking image: $e'),
             backgroundColor: AppTheme.error,
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
           ),
         );
       }
@@ -81,66 +93,65 @@ class ChatInputState extends State<ChatInput> {
       context: context,
       backgroundColor: AppTheme.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
       ),
       builder: (context) => SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Handle bar
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 3,
                   color: AppTheme.border,
-                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              const SizedBox(height: 24),
-              
-              // Title
+              const SizedBox(height: 20),
               Text(
-                'Add Room Photo',
-                style: GoogleFonts.dmSerifDisplay(
-                  fontSize: 24,
-                  color: AppTheme.textPrimary,
+                'Add room photo',
+                style: GoogleFonts.interTight(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.ink,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Text(
                 'Take a new photo or choose from gallery',
-                style: GoogleFonts.dmSans(
-                  fontSize: 14,
+                style: GoogleFonts.interTight(
+                  fontSize: 13,
                   color: AppTheme.textMuted,
                 ),
               ),
-              const SizedBox(height: 28),
-              
-              // Options
+              const SizedBox(height: 20),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  _buildImageSourceOption(
-                    icon: Icons.camera_alt_rounded,
-                    label: 'Camera',
-                    onTap: () {
-                      Navigator.pop(context);
-                      _pickImage(ImageSource.camera);
-                    },
+                  Expanded(
+                    child: _SourceOption(
+                      icon: Icons.camera_alt_outlined,
+                      label: 'Camera',
+                      onTap: () {
+                        Navigator.pop(context);
+                        _pickImage(ImageSource.camera);
+                      },
+                    ),
                   ),
-                  _buildImageSourceOption(
-                    icon: Icons.photo_library_rounded,
-                    label: 'Gallery',
-                    onTap: () {
-                      Navigator.pop(context);
-                      _pickImage(ImageSource.gallery);
-                    },
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _SourceOption(
+                      icon: Icons.photo_library_outlined,
+                      label: 'Gallery',
+                      onTap: () {
+                        Navigator.pop(context);
+                        _pickImage(ImageSource.gallery);
+                      },
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
             ],
           ),
         ),
@@ -148,181 +159,101 @@ class ChatInputState extends State<ChatInput> {
     );
   }
 
-  Widget _buildImageSourceOption({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 24),
-        decoration: BoxDecoration(
-          color: AppTheme.inputBackground,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: AppTheme.border),
-        ),
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppTheme.primaryColor,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.primaryColor.withOpacity(0.3),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Icon(icon, color: Colors.white, size: 28),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              label,
-              style: GoogleFonts.dmSans(
-                color: AppTheme.textPrimary,
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
+    final hint = widget.selectedImage != null
+        ? 'Describe the changes you want…'
+        : widget.roomHint != null
+            ? 'Describe your ${widget.roomHint!.toLowerCase()}…'
+            : 'Describe your dream room…';
+
     return Container(
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 16,
-        bottom: MediaQuery.of(context).padding.bottom + 16,
+      padding: EdgeInsets.fromLTRB(
+        14,
+        10,
+        14,
+        MediaQuery.of(context).padding.bottom + 10,
       ),
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: AppTheme.surface,
-        border: Border(
-          top: BorderSide(color: AppTheme.border),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
-          ),
-        ],
+        border: Border(top: BorderSide(color: AppTheme.gridLine)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Selected Image Preview
           if (widget.selectedImage != null) ...[
-            Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              child: Row(
-                children: [
-                  // Image thumbnail
-                  Container(
+            Row(
+              children: [
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: AppTheme.ink, width: 1),
+                  ),
+                  child: PlatformFileImage(
+                    file: widget.selectedImage!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const Icon(
+                      Icons.image_outlined,
+                      color: AppTheme.textMuted,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Photo attached',
+                        style: GoogleFonts.interTight(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.ink,
+                        ),
+                      ),
+                      Text(
+                        'Describe how to redesign it',
+                        style: GoogleFonts.interTight(
+                          fontSize: 12,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                GestureDetector(
+                  onTap: widget.onClearImage,
+                  child: Container(
+                    width: 32,
+                    height: 32,
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppTheme.primaryColor, width: 2),
-                      boxShadow: AppTheme.cardShadow,
+                      border: Border.all(color: AppTheme.border),
                     ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: Image.file(
-                        widget.selectedImage!,
-                        height: 72,
-                        width: 72,
-                        fit: BoxFit.cover,
-                      ),
+                    child: const Icon(
+                      Icons.close_rounded,
+                      size: 16,
+                      color: AppTheme.ink,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  
-                  // Info text
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Photo attached',
-                          style: GoogleFonts.dmSans(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.textPrimary,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Describe how to redesign it',
-                          style: GoogleFonts.dmSans(
-                            fontSize: 12,
-                            color: AppTheme.textMuted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  
-                  // Remove button
-                  GestureDetector(
-                    onTap: widget.onClearImage,
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: AppTheme.error.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(
-                        Icons.close_rounded,
-                        color: AppTheme.error,
-                        size: 20,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
+            const SizedBox(height: 10),
           ],
-          
-          // Input Row
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              // Attachment Button
-              GestureDetector(
+              _SquareBtn(
+                icon: Icons.add_photo_alternate_outlined,
                 onTap: widget.isLoading ? null : showImageSourcePicker,
-                child: Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: AppTheme.inputBackground,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AppTheme.border),
-                  ),
-                  child: Icon(
-                    Icons.add_photo_alternate_rounded,
-                    color: widget.isLoading 
-                        ? AppTheme.textMuted 
-                        : AppTheme.primaryColor,
-                    size: 22,
-                  ),
-                ),
+                emphasized: false,
               ),
-              
-              const SizedBox(width: 12),
-              
-              // Text Input
+              const SizedBox(width: 8),
               Expanded(
                 child: Container(
                   decoration: BoxDecoration(
-                    color: AppTheme.inputBackground,
-                    borderRadius: BorderRadius.circular(24),
+                    color: AppTheme.background,
                     border: Border.all(color: AppTheme.border),
                   ),
                   child: TextField(
@@ -332,24 +263,22 @@ class ChatInputState extends State<ChatInput> {
                     maxLines: 4,
                     minLines: 1,
                     textCapitalization: TextCapitalization.sentences,
-                    style: GoogleFonts.dmSans(
-                      color: AppTheme.textPrimary,
-                      fontSize: 15,
+                    style: GoogleFonts.interTight(
+                      color: AppTheme.ink,
+                      fontSize: 14,
                     ),
                     decoration: InputDecoration(
-                      hintText: widget.selectedImage != null
-                          ? 'Describe the changes...'
-                          : 'Describe your dream room...',
-                      hintStyle: GoogleFonts.dmSans(
+                      hintText: hint,
+                      hintStyle: GoogleFonts.interTight(
                         color: AppTheme.textMuted,
-                        fontSize: 15,
+                        fontSize: 14,
                       ),
                       filled: true,
                       fillColor: Colors.transparent,
                       border: InputBorder.none,
                       contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 14,
+                        horizontal: 14,
+                        vertical: 12,
                       ),
                     ),
                     onChanged: (_) => setState(() {}),
@@ -357,46 +286,116 @@ class ChatInputState extends State<ChatInput> {
                   ),
                 ),
               ),
-              
-              const SizedBox(width: 12),
-              
-              // Send Button
-              GestureDetector(
+              const SizedBox(width: 8),
+              _SquareBtn(
+                icon: Icons.arrow_upward_rounded,
                 onTap: _canSend ? _sendMessage : null,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: _canSend ? AppTheme.primaryColor : AppTheme.inputBackground,
-                    borderRadius: BorderRadius.circular(14),
-                    border: _canSend ? null : Border.all(color: AppTheme.border),
-                    boxShadow: _canSend ? [
-                      BoxShadow(
-                        color: AppTheme.primaryColor.withOpacity(0.3),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ] : null,
-                  ),
-                  child: widget.isLoading
-                      ? Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.5,
-                            color: _canSend ? Colors.white : AppTheme.primaryColor,
-                          ),
-                        )
-                      : Icon(
-                          Icons.arrow_upward_rounded,
-                          color: _canSend ? Colors.white : AppTheme.textMuted,
-                          size: 22,
-                        ),
-                ),
+                emphasized: _canSend,
+                loading: widget.isLoading,
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SquareBtn extends StatelessWidget {
+  const _SquareBtn({
+    required this.icon,
+    required this.onTap,
+    this.emphasized = false,
+    this.loading = false,
+  });
+
+  final IconData icon;
+  final VoidCallback? onTap;
+  final bool emphasized;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: emphasized ? AppTheme.primaryColor : AppTheme.background,
+          border: Border.all(
+            color: emphasized ? AppTheme.primaryColor : AppTheme.border,
+          ),
+        ),
+        child: loading
+            ? Padding(
+                padding: const EdgeInsets.all(11),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: emphasized ? Colors.white : AppTheme.primaryColor,
+                ),
+              )
+            : Icon(
+                icon,
+                size: 18,
+                color: emphasized
+                    ? Colors.white
+                    : (onTap == null ? AppTheme.textMuted : AppTheme.ink),
+              ),
+      ),
+    );
+  }
+}
+
+class _SourceOption extends StatefulWidget {
+  const _SourceOption({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  State<_SourceOption> createState() => _SourceOptionState();
+}
+
+class _SourceOptionState extends State<_SourceOption> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          decoration: BoxDecoration(
+            color: _hovered ? AppTheme.panelTone : AppTheme.background,
+            border: Border.all(color: AppTheme.border),
+          ),
+          child: Column(
+            children: [
+              Icon(widget.icon, size: 24, color: AppTheme.ink),
+              const SizedBox(height: 10),
+              Text(
+                widget.label,
+                style: GoogleFonts.interTight(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.ink,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

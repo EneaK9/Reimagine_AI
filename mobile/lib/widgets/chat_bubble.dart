@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -7,6 +7,7 @@ import 'package:shimmer/shimmer.dart';
 import '../models/message.dart';
 import '../theme/app_theme.dart';
 import 'image_gallery.dart';
+import 'platform_image.dart';
 
 /// Chat message bubble widget - Light theme design
 class ChatBubble extends StatelessWidget {
@@ -35,32 +36,32 @@ class ChatBubble extends StatelessWidget {
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Row(
-        mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment:
+            isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (!isUser) _buildAvatar(),
-          if (!isUser) const SizedBox(width: 12),
+          if (!isUser) const SizedBox(width: 10),
           Flexible(
             child: Column(
-              crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+              crossAxisAlignment:
+                  isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
               children: [
-                // Show uploaded image above user message
                 if (isUser && message.imageUrls.isNotEmpty) ...[
                   _buildUploadedImage(context),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                 ],
                 _buildMessageBubble(context),
-                // Show generated images below AI message
                 if (!isUser && message.imageUrls.isNotEmpty) ...[
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   _buildImageGrid(context),
                 ],
               ],
             ),
           ),
-          if (isUser) const SizedBox(width: 12),
+          if (isUser) const SizedBox(width: 10),
           if (isUser) _buildUserAvatar(),
         ],
       ),
@@ -69,24 +70,16 @@ class ChatBubble extends StatelessWidget {
 
   Widget _buildAvatar() {
     return Container(
-      width: 38,
-      height: 38,
-      decoration: BoxDecoration(
-        color: AppTheme.primaryColor,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.primaryColor.withOpacity(0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: const Center(
-        child: Icon(
-          Icons.home_rounded,
-          color: Colors.white,
-          size: 20,
+      width: 30,
+      height: 30,
+      color: AppTheme.ink,
+      alignment: Alignment.center,
+      child: Text(
+        '✱',
+        style: GoogleFonts.interTight(
+          color: AppTheme.background,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );
@@ -94,18 +87,17 @@ class ChatBubble extends StatelessWidget {
 
   Widget _buildUserAvatar() {
     return Container(
-      width: 38,
-      height: 38,
+      width: 30,
+      height: 30,
       decoration: BoxDecoration(
         color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppTheme.border),
       ),
       child: const Center(
         child: Icon(
-          Icons.person_rounded,
+          Icons.person_outline_rounded,
           color: AppTheme.textSecondary,
-          size: 20,
+          size: 16,
         ),
       ),
     );
@@ -116,32 +108,19 @@ class ChatBubble extends StatelessWidget {
       constraints: BoxConstraints(
         maxWidth: MediaQuery.of(context).size.width * 0.72,
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
       decoration: BoxDecoration(
-        color: isUser ? AppTheme.primaryColor : AppTheme.surface,
-        borderRadius: BorderRadius.only(
-          topLeft: const Radius.circular(20),
-          topRight: const Radius.circular(20),
-          bottomLeft: Radius.circular(isUser ? 20 : 6),
-          bottomRight: Radius.circular(isUser ? 6 : 20),
+        color: isUser ? AppTheme.ink : AppTheme.surface,
+        border: Border.all(
+          color: isUser ? AppTheme.ink : AppTheme.border,
         ),
-        border: isUser ? null : Border.all(color: AppTheme.border),
-        boxShadow: [
-          BoxShadow(
-            color: isUser 
-                ? AppTheme.primaryColor.withOpacity(0.2) 
-                : Colors.black.withOpacity(0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
       ),
       child: Text(
         displayContent,
-        style: GoogleFonts.dmSans(
-          color: isUser ? Colors.white : AppTheme.textPrimary,
-          fontSize: 15,
-          height: 1.5,
+        style: GoogleFonts.interTight(
+          color: isUser ? AppTheme.background : AppTheme.ink,
+          fontSize: 14,
+          height: 1.45,
         ),
       ),
     );
@@ -166,18 +145,6 @@ class ChatBubble extends StatelessWidget {
   }
 
   Widget _buildImageFromPath(String imagePath) {
-    // Local file path
-    if (imagePath.startsWith('/') || imagePath.contains(':\\') || (!imagePath.contains('://') && !imagePath.startsWith('data:'))) {
-      final file = File(imagePath);
-      if (file.existsSync()) {
-        return Image.file(
-          file,
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) => _buildImageError(),
-        );
-      }
-    }
-    
     // Base64 data URL
     if (imagePath.startsWith('data:image')) {
       try {
@@ -192,17 +159,36 @@ class ChatBubble extends StatelessWidget {
         return _buildImageError();
       }
     }
-    
-    // Network URL
-    return CachedNetworkImage(
-      imageUrl: imagePath,
+
+    // Web / blob / http — never use Image.file on web
+    if (kIsWeb ||
+        imagePath.startsWith('blob:') ||
+        imagePath.startsWith('http://') ||
+        imagePath.startsWith('https://')) {
+      if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+        return CachedNetworkImage(
+          imageUrl: imagePath,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Shimmer.fromColors(
+            baseColor: AppTheme.border,
+            highlightColor: AppTheme.surface,
+            child: Container(color: AppTheme.border),
+          ),
+          errorWidget: (context, url, error) => _buildImageError(),
+        );
+      }
+      return PlatformImage(
+        path: imagePath,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => _buildImageError(),
+      );
+    }
+
+    // Native local file path
+    return PlatformImage(
+      path: imagePath,
       fit: BoxFit.cover,
-      placeholder: (context, url) => Shimmer.fromColors(
-        baseColor: AppTheme.border,
-        highlightColor: AppTheme.surface,
-        child: Container(color: AppTheme.border),
-      ),
-      errorWidget: (context, url, error) => _buildImageError(),
+      errorBuilder: (context, error, stackTrace) => _buildImageError(),
     );
   }
 
@@ -323,31 +309,25 @@ class ChatBubble extends StatelessWidget {
 
   Widget _buildLoadingBubble(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildAvatar(),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
               color: AppTheme.surface,
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(20),
-                topRight: Radius.circular(20),
-                bottomLeft: Radius.circular(6),
-                bottomRight: Radius.circular(20),
-              ),
               border: Border.all(color: AppTheme.border),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 _buildDot(0),
-                const SizedBox(width: 6),
+                const SizedBox(width: 5),
                 _buildDot(1),
-                const SizedBox(width: 6),
+                const SizedBox(width: 5),
                 _buildDot(2),
               ],
             ),
@@ -364,10 +344,11 @@ class ChatBubble extends StatelessWidget {
       builder: (context, value, child) {
         return AnimatedContainer(
           duration: const Duration(milliseconds: 300),
-          width: 8,
-          height: 8,
+          width: 6,
+          height: 6,
           decoration: BoxDecoration(
-            color: AppTheme.primaryColor.withOpacity(0.3 + (0.7 * value)),
+            color: AppTheme.primaryColor
+                .withValues(alpha: 0.3 + (0.7 * value)),
             shape: BoxShape.circle,
           ),
         );

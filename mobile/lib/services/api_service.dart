@@ -1,5 +1,7 @@
 import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:image_picker/image_picker.dart';
 import '../config/api_config.dart';
 
 /// API Service for communicating with the backend (Singleton)
@@ -38,6 +40,23 @@ class ApiService {
     } else {
       _dio.options.headers.remove('Authorization');
     }
+  }
+
+  /// Build a multipart image part that works on web and mobile.
+  /// `MultipartFile.fromFile` is not reliable on Flutter Web (blob paths).
+  Future<MultipartFile> _imageMultipart(File imageFile) async {
+    final path = imageFile.path;
+    final filename = path.split('/').last.split('\\').last;
+    final safeName = filename.isEmpty || filename.startsWith('blob:')
+        ? 'image.jpg'
+        : filename;
+
+    if (kIsWeb) {
+      final bytes = await XFile(path).readAsBytes();
+      return MultipartFile.fromBytes(bytes, filename: safeName);
+    }
+
+    return MultipartFile.fromFile(path, filename: safeName);
   }
 
   // ============ Auth Methods ============
@@ -125,10 +144,7 @@ class ApiService {
         'message': message,
         'conversation_id': conversationId,
         if (meshId != null) 'mesh_id': meshId,
-        'image': await MultipartFile.fromFile(
-          imageFile.path,
-          filename: imageFile.path.split('/').last,
-        ),
+        'image': await _imageMultipart(imageFile),
       });
 
       final response = await _dio.post(
@@ -202,10 +218,7 @@ class ApiService {
   Future<Map<String, dynamic>> analyzeRoom(File imageFile) async {
     try {
       final formData = FormData.fromMap({
-        'image': await MultipartFile.fromFile(
-          imageFile.path,
-          filename: imageFile.path.split('/').last,
-        ),
+        'image': await _imageMultipart(imageFile),
       });
 
       final response = await _dio.post(
@@ -238,10 +251,7 @@ class ApiService {
   Future<Map<String, dynamic>> generateMeshFromPhoto(File imageFile) async {
     try {
       final formData = FormData.fromMap({
-        'image': await MultipartFile.fromFile(
-          imageFile.path,
-          filename: imageFile.path.split('/').last,
-        ),
+        'image': await _imageMultipart(imageFile),
       });
 
       final response = await _dio.post(
