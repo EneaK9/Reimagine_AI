@@ -3,12 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import '../theme/app_theme.dart';
+import 'app_control.dart';
 import 'platform_image.dart';
 
-/// Compact LUXE-styled composer for the design studio.
+/// Design-studio composer. Styling comes from [AppTheme] / ThemeData.
 class ChatInput extends StatefulWidget {
-  static const double _controlSize = 42;
-  static const double _controlRadius = 8;
   final Function(String message) onSend;
   final Function(File image) onImageSelected;
   final File? selectedImage;
@@ -94,8 +93,10 @@ class ChatInputState extends State<ChatInput> {
     showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppTheme.radiusLg),
+        ),
       ),
       builder: (context) => SafeArea(
         child: Padding(
@@ -141,7 +142,7 @@ class ChatInputState extends State<ChatInput> {
                       },
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  SizedBox(width: AppTheme.controlGap + 2),
                   Expanded(
                     child: _SourceOption(
                       icon: Icons.photo_library_outlined,
@@ -189,9 +190,11 @@ class ChatInputState extends State<ChatInput> {
                 Container(
                   width: 52,
                   height: 52,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: AppTheme.ink, width: 1),
+                  decoration: AppTheme.controlDecoration(
+                    color: AppTheme.surface,
+                    borderColor: AppTheme.ink,
                   ),
+                  clipBehavior: Clip.antiAlias,
                   child: PlatformFileImage(
                     file: widget.selectedImage!,
                     fit: BoxFit.cover,
@@ -224,20 +227,10 @@ class ChatInputState extends State<ChatInput> {
                     ],
                   ),
                 ),
-                GestureDetector(
+                AppIconControl(
+                  icon: Icons.close_rounded,
                   onTap: widget.onClearImage,
-                  child: Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      border: Border.all(color: AppTheme.border),
-                    ),
-                    child: const Icon(
-                      Icons.close_rounded,
-                      size: 16,
-                      color: AppTheme.ink,
-                    ),
-                  ),
+                  tooltip: 'Remove photo',
                 ),
               ],
             ),
@@ -246,124 +239,34 @@ class ChatInputState extends State<ChatInput> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              _SquareBtn(
+              AppIconControl(
                 icon: Icons.add_photo_alternate_outlined,
                 onTap: widget.isLoading ? null : showImageSourcePicker,
-                emphasized: false,
+                tooltip: 'Add photo',
               ),
-              const SizedBox(width: 8),
+              SizedBox(width: AppTheme.controlGap),
               Expanded(
-                child: SizedBox(
-                  height: ChatInput._controlSize,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: AppTheme.background,
-                      border: Border.all(color: AppTheme.border),
-                      borderRadius:
-                          BorderRadius.circular(ChatInput._controlRadius),
-                    ),
-                    child: ClipRRect(
-                      borderRadius:
-                          BorderRadius.circular(ChatInput._controlRadius),
-                      child: TextField(
-                        controller: _controller,
-                        focusNode: _focusNode,
-                        enabled: !widget.isLoading,
-                        maxLines: 1,
-                        textAlignVertical: TextAlignVertical.center,
-                        textCapitalization: TextCapitalization.sentences,
-                        style: GoogleFonts.interTight(
-                          color: AppTheme.ink,
-                          fontSize: 14,
-                          height: 1.2,
-                        ),
-                        decoration: InputDecoration(
-                          hintText: hint,
-                          hintStyle: GoogleFonts.interTight(
-                            color: AppTheme.textMuted,
-                            fontSize: 14,
-                            height: 1.2,
-                          ),
-                          isDense: true,
-                          filled: true,
-                          fillColor: Colors.transparent,
-                          // Override theme OutlineInputBorder (radius 16)
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          disabledBorder: InputBorder.none,
-                          errorBorder: InputBorder.none,
-                          focusedErrorBorder: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 0,
-                          ),
-                        ),
-                        onChanged: (_) => setState(() {}),
-                        onSubmitted: (_) => _sendMessage(),
-                      ),
-                    ),
-                  ),
+                child: AppControlField(
+                  controller: _controller,
+                  focusNode: _focusNode,
+                  hintText: hint,
+                  enabled: !widget.isLoading,
+                  textCapitalization: TextCapitalization.sentences,
+                  onChanged: (_) => setState(() {}),
+                  onSubmitted: (_) => _sendMessage(),
                 ),
               ),
-              const SizedBox(width: 8),
-              _SquareBtn(
+              SizedBox(width: AppTheme.controlGap),
+              AppIconControl(
                 icon: Icons.arrow_upward_rounded,
                 onTap: _canSend ? _sendMessage : null,
                 emphasized: _canSend,
                 loading: widget.isLoading,
+                tooltip: 'Send',
               ),
             ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _SquareBtn extends StatelessWidget {
-  const _SquareBtn({
-    required this.icon,
-    required this.onTap,
-    this.emphasized = false,
-    this.loading = false,
-  });
-
-  final IconData icon;
-  final VoidCallback? onTap;
-  final bool emphasized;
-  final bool loading;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
-        width: ChatInput._controlSize,
-        height: ChatInput._controlSize,
-        decoration: BoxDecoration(
-          color: emphasized ? AppTheme.primaryColor : AppTheme.background,
-          border: Border.all(
-            color: emphasized ? AppTheme.primaryColor : AppTheme.border,
-          ),
-          borderRadius: BorderRadius.circular(ChatInput._controlRadius),
-        ),
-        child: loading
-            ? Padding(
-                padding: const EdgeInsets.all(11),
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: emphasized ? Colors.white : AppTheme.primaryColor,
-                ),
-              )
-            : Icon(
-                icon,
-                size: 18,
-                color: emphasized
-                    ? Colors.white
-                    : (onTap == null ? AppTheme.textMuted : AppTheme.ink),
-              ),
       ),
     );
   }
@@ -398,9 +301,8 @@ class _SourceOptionState extends State<_SourceOption> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 140),
           padding: const EdgeInsets.symmetric(vertical: 20),
-          decoration: BoxDecoration(
-            color: _hovered ? AppTheme.panelTone : AppTheme.background,
-            border: Border.all(color: AppTheme.border),
+          decoration: AppTheme.controlDecoration(
+            color: _hovered ? AppTheme.panelTone : AppTheme.inputBackground,
           ),
           child: Column(
             children: [

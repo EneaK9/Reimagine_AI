@@ -33,12 +33,53 @@ class AppTheme {
 
   // Auth palette - greige family
   static const Color ink = Color(0xFF1D1B18);
-  static const Color authFieldFill = Color(0xFFE9E5DE);
-  static const Color authBorder = Color(0xFFDCD7CE);
-  static const Color authMuted = Color(0xFF8A867E);
-  static const double authFieldRadius = 10;
-  static const double authButtonRadius = 12;
+  static const Color authFieldFill = inputBackground;
+  static const Color authBorder = border;
+  static const Color authMuted = textMuted;
+
+  // ---- Shared shape / control scale (use these everywhere) ----
+  static const double radiusSm = 8;
+  static const double radiusMd = 10;
+  static const double radiusLg = 12;
+  static const double radiusXl = 16;
+
+  /// Compact controls: composer field, icon buttons, dense inputs
+  static const double controlHeight = 44;
+  static const double controlRadius = radiusMd;
+  static const double controlGap = 8;
+
+  /// Form fields & primary CTAs
+  static const double fieldRadius = radiusMd;
+  static const double buttonRadius = radiusMd;
+  static const double buttonHeight = 48;
+
+  // Back-compat aliases (prefer the tokens above)
+  static const double authFieldRadius = fieldRadius;
+  static const double authButtonRadius = buttonRadius;
   static const double authPanelRadius = 28;
+
+  /// Outlined chrome shared by composer buttons / shells
+  static BoxDecoration controlDecoration({
+    Color? color,
+    Color? borderColor,
+    double? radius,
+  }) {
+    return BoxDecoration(
+      color: color ?? inputBackground,
+      border: Border.all(color: borderColor ?? border),
+      borderRadius: BorderRadius.circular(radius ?? controlRadius),
+    );
+  }
+
+  static OutlineInputBorder fieldBorder({
+    Color? color,
+    double width = 1,
+  }) {
+    return OutlineInputBorder(
+      borderRadius: BorderRadius.circular(fieldRadius),
+      borderSide: BorderSide(color: color ?? border, width: width),
+    );
+  }
 
   // Landing-only tokens
   static const Color gridLine = Color(0xFFDBD6CD);
@@ -213,24 +254,23 @@ class AppTheme {
       ),
     ),
     
-    // Input Decoration
+    // Input Decorations — single source for all TextFields
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: surface,
-      hintStyle: GoogleFonts.dmSans(color: textMuted, fontSize: 15),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: border),
+      fillColor: inputBackground,
+      isDense: true,
+      hintStyle: GoogleFonts.interTight(color: textMuted, fontSize: 14),
+      labelStyle: GoogleFonts.interTight(color: textSecondary, fontSize: 14),
+      border: fieldBorder(),
+      enabledBorder: fieldBorder(),
+      disabledBorder: fieldBorder(color: borderLight),
+      focusedBorder: fieldBorder(color: primaryColor, width: 1.5),
+      errorBorder: fieldBorder(color: error),
+      focusedErrorBorder: fieldBorder(color: error, width: 1.5),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      constraints: const BoxConstraints(
+        minHeight: controlHeight,
       ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: border),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: primaryColor, width: 2),
-      ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
     ),
     
     // Elevated Button
@@ -240,12 +280,13 @@ class AppTheme {
         foregroundColor: Colors.white,
         overlayColor: overlayBase,
         elevation: 0,
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+        minimumSize: const Size(0, buttonHeight),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(buttonRadius),
         ),
-        textStyle: GoogleFonts.dmSans(
-          fontSize: 16,
+        textStyle: GoogleFonts.interTight(
+          fontSize: 15,
           fontWeight: FontWeight.w600,
         ),
       ),
@@ -254,15 +295,16 @@ class AppTheme {
     // Outlined Button
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        foregroundColor: primaryColor,
+        foregroundColor: ink,
         overlayColor: overlayBase,
-        side: const BorderSide(color: primaryColor, width: 1.5),
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+        side: const BorderSide(color: border),
+        minimumSize: const Size(0, buttonHeight),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(buttonRadius),
         ),
-        textStyle: GoogleFonts.dmSans(
-          fontSize: 16,
+        textStyle: GoogleFonts.interTight(
+          fontSize: 15,
           fontWeight: FontWeight.w600,
         ),
       ),

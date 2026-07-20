@@ -19,7 +19,7 @@ class PrimaryAuthButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
-      height: 48,
+      height: AppTheme.buttonHeight,
       child: ElevatedButton(
         onPressed: loading ? null : onPressed,
         style: ElevatedButton.styleFrom(
@@ -31,7 +31,7 @@ class PrimaryAuthButton extends StatelessWidget {
           disabledForegroundColor: Colors.white70,
           elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppTheme.authButtonRadius),
+            borderRadius: BorderRadius.circular(AppTheme.buttonRadius),
           ),
         ),
         child: AnimatedSwitcher(
@@ -75,16 +75,16 @@ class OutlinedAuthButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
-      height: 48,
+      height: AppTheme.buttonHeight,
       child: OutlinedButton(
         onPressed: onPressed,
         style: OutlinedButton.styleFrom(
           foregroundColor: AppTheme.ink,
           backgroundColor: Colors.white,
           overlayColor: AppTheme.overlayBase,
-          side: const BorderSide(color: AppTheme.authBorder),
+          side: const BorderSide(color: AppTheme.border),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppTheme.authButtonRadius),
+            borderRadius: BorderRadius.circular(AppTheme.buttonRadius),
           ),
         ),
         child: Row(
