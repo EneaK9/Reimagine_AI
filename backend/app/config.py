@@ -14,8 +14,10 @@ class Settings(BaseSettings):
     # API Keys
     openai_api_key: str = ""
     
-    # Database
-    database_url: str = "postgresql+asyncpg://user:password@localhost:5432/reimagine_ai"
+    # Database (local Homebrew / Docker Postgres)
+    database_url: str = (
+        "postgresql+psycopg://reimagine:reimagine@127.0.0.1:5432/reimagine_ai"
+    )
     
     # JWT Settings
     secret_key: str = "your-secret-key-change-in-production"

@@ -1,254 +1,255 @@
 """
-ReimagineAI - Conversation Service
-Manages chat conversations and history with JSON file persistence
+ReimagineAI - Conversation Service (PostgreSQL)
 """
-from typing import Dict, List, Optional
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Dict, List, Optional
 import uuid
+
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session, selectinload
+
+from ..db.models import Conversation as ConversationRow
+from ..db.models import Message as MessageRow
 from ..models.schemas import ChatMessage, Conversation, MessageRole
-from .json_storage import json_storage
 
 
 class ConversationService:
-    """
-    Conversation storage with JSON file persistence.
-    Data is saved to local JSON files for development.
-    """
-    
-    def __init__(self):
-        # Load existing conversations from JSON storage
-        self._load_conversations()
-        print(f"[ConversationService] Loaded {len(self._conversations)} conversations from storage")
-    
-    def _load_conversations(self) -> None:
-        """Load conversations from JSON storage into memory."""
-        self._conversations: Dict[str, Conversation] = {}
-        
-        stored_convs = json_storage.get_all_conversations()
-        for conv_id, conv_data in stored_convs.items():
-            try:
-                # Parse messages
-                messages = []
-                for msg_data in conv_data.get('messages', []):
-                    messages.append(ChatMessage(
-                        role=MessageRole(msg_data['role']),
-                        content=msg_data['content'],
-                        image_url=msg_data.get('image_url'),
-                        timestamp=datetime.fromisoformat(msg_data['timestamp']) if msg_data.get('timestamp') else datetime.utcnow()
-                    ))
-                
-                # Create conversation object
-                conversation = Conversation(
-                    id=conv_data['id'],
-                    title=conv_data['title'],
-                    messages=messages,
-                    created_at=datetime.fromisoformat(conv_data['created_at']) if conv_data.get('created_at') else datetime.utcnow(),
-                    updated_at=datetime.fromisoformat(conv_data['updated_at']) if conv_data.get('updated_at') else datetime.utcnow(),
-                    original_image=conv_data.get('original_image'),
-                    last_generated_image=conv_data.get('last_generated_image'),
-                    mesh_id=conv_data.get('mesh_id')
-                )
-                self._conversations[conv_id] = conversation
-            except Exception as e:
-                print(f"[ConversationService] Error loading conversation {conv_id}: {e}")
-    
-    def _save_conversation(self, conversation: Conversation) -> None:
-        """Save a conversation to JSON storage."""
-        conv_data = {
-            'id': conversation.id,
-            'title': conversation.title,
-            'messages': [
-                {
-                    'role': msg.role.value,
-                    'content': msg.content,
-                    'image_url': msg.image_url,
-                    'timestamp': msg.timestamp.isoformat() if msg.timestamp else None
-                }
-                for msg in conversation.messages
-            ],
-            'created_at': conversation.created_at.isoformat(),
-            'updated_at': conversation.updated_at.isoformat(),
-            'original_image': getattr(conversation, 'original_image', None),
-            'last_generated_image': getattr(conversation, 'last_generated_image', None),
-            'mesh_id': getattr(conversation, 'mesh_id', None)
-        }
-        json_storage.save_conversation(conversation.id, conv_data)
-    
-    def create_conversation(self, title: str = "New Chat") -> Conversation:
-        """Create a new conversation."""
-        conversation_id = f"conv_{uuid.uuid4().hex[:12]}"
-        conversation = Conversation(
-            id=conversation_id,
-            title=title,
-            messages=[],
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+    """Conversation + message persistence in PostgreSQL."""
+
+    def _to_schema(self, row: ConversationRow) -> Conversation:
+        messages = [
+            ChatMessage(
+                role=MessageRole(msg.role),
+                content=msg.content or "",
+                image_url=msg.image_url,
+                timestamp=msg.created_at or datetime.utcnow(),
+            )
+            for msg in (row.messages or [])
+        ]
+        return Conversation(
+            id=row.id,
+            title=row.title,
+            messages=messages,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            original_image=row.original_image,
+            last_generated_image=row.last_generated_image,
+            mesh_id=row.mesh_id,
         )
-        self._conversations[conversation_id] = conversation
-        self._save_conversation(conversation)
-        return conversation
-    
-    def get_conversation(self, conversation_id: str) -> Optional[Conversation]:
-        """Get a conversation by ID."""
-        return self._conversations.get(conversation_id)
-    
-    def get_or_create_conversation(self, conversation_id: Optional[str]) -> Conversation:
-        """Get existing conversation or create a new one."""
-        if conversation_id and conversation_id in self._conversations:
-            return self._conversations[conversation_id]
-        return self.create_conversation()
-    
+
+    def _get_row(
+        self,
+        db: Session,
+        conversation_id: str,
+        user_id: Optional[str] = None,
+        *,
+        with_messages: bool = True,
+    ) -> Optional[ConversationRow]:
+        stmt = select(ConversationRow).where(ConversationRow.id == conversation_id)
+        if user_id:
+            stmt = stmt.where(ConversationRow.user_id == user_id)
+        if with_messages:
+            stmt = stmt.options(selectinload(ConversationRow.messages))
+        return db.scalar(stmt)
+
+    def create_conversation(
+        self, db: Session, user_id: str, title: str = "New Chat"
+    ) -> Conversation:
+        row = ConversationRow(
+            id=f"conv_{uuid.uuid4().hex[:12]}",
+            user_id=user_id,
+            title=title,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        row.messages = []
+        return self._to_schema(row)
+
+    def get_conversation(
+        self, db: Session, conversation_id: str, user_id: Optional[str] = None
+    ) -> Optional[Conversation]:
+        row = self._get_row(db, conversation_id, user_id)
+        return self._to_schema(row) if row else None
+
+    def get_or_create_conversation(
+        self,
+        db: Session,
+        user_id: str,
+        conversation_id: Optional[str],
+    ) -> Conversation:
+        if conversation_id:
+            existing = self.get_conversation(db, conversation_id, user_id)
+            if existing:
+                return existing
+        return self.create_conversation(db, user_id)
+
     def add_message(
         self,
+        db: Session,
         conversation_id: str,
         role: MessageRole,
         content: str,
-        image_url: Optional[str] = None
+        image_url: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> ChatMessage:
-        """Add a message to a conversation."""
-        conversation = self._conversations.get(conversation_id)
-        if not conversation:
+        row = self._get_row(db, conversation_id, user_id)
+        if not row:
             raise ValueError(f"Conversation {conversation_id} not found")
-        
-        message = ChatMessage(
-            role=role,
+
+        position = len(row.messages)
+        msg = MessageRow(
+            conversation_id=conversation_id,
+            role=role.value if isinstance(role, MessageRole) else str(role),
             content=content,
             image_url=image_url,
-            timestamp=datetime.utcnow()
+            position=position,
+            created_at=datetime.utcnow(),
         )
-        conversation.messages.append(message)
-        conversation.updated_at = datetime.utcnow()
-        
-        # Update title based on first user message
-        if len(conversation.messages) == 1 and role == MessageRole.USER:
-            conversation.title = content[:50] + ("..." if len(content) > 50 else "")
-        
-        # Save to JSON storage
-        self._save_conversation(conversation)
-        
-        return message
-    
+        db.add(msg)
+
+        if position == 0 and role == MessageRole.USER:
+            row.title = content[:50] + ("..." if len(content) > 50 else "")
+        row.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(msg)
+
+        return ChatMessage(
+            role=MessageRole(msg.role),
+            content=msg.content,
+            image_url=msg.image_url,
+            timestamp=msg.created_at,
+        )
+
     def get_messages_for_context(
         self,
+        db: Session,
         conversation_id: str,
-        max_messages: int = 10
+        max_messages: int = 10,
+        user_id: Optional[str] = None,
     ) -> List[Dict]:
-        """
-        Get recent messages formatted for OpenAI API.
-        Limits to last N messages to manage context window.
-        """
-        conversation = self._conversations.get(conversation_id)
-        if not conversation:
+        row = self._get_row(db, conversation_id, user_id)
+        if not row:
             return []
-        
-        # Get last N messages
-        recent_messages = conversation.messages[-max_messages:]
-        
+        recent = (row.messages or [])[-max_messages:]
         return [
             {
-                "role": msg.role.value,
+                "role": msg.role,
                 "content": msg.content,
-                "image_url": msg.image_url
+                "image_url": msg.image_url,
             }
-            for msg in recent_messages
+            for msg in recent
         ]
-    
-    def list_conversations(self, limit: int = 20) -> List[Conversation]:
-        """List all conversations, most recent first."""
-        conversations = list(self._conversations.values())
-        conversations.sort(key=lambda x: x.updated_at, reverse=True)
-        return conversations[:limit]
-    
-    def delete_conversation(self, conversation_id: str) -> bool:
-        """Delete a conversation."""
-        if conversation_id in self._conversations:
-            del self._conversations[conversation_id]
-            json_storage.delete_conversation(conversation_id)
-            return True
-        return False
-    
+
+    def list_conversations(
+        self, db: Session, user_id: str, limit: int = 20
+    ) -> List[Conversation]:
+        stmt = (
+            select(ConversationRow)
+            .where(ConversationRow.user_id == user_id)
+            .options(selectinload(ConversationRow.messages))
+            .order_by(ConversationRow.updated_at.desc())
+            .limit(limit)
+        )
+        rows = db.scalars(stmt).all()
+        return [self._to_schema(r) for r in rows]
+
+    def delete_conversation(
+        self, db: Session, conversation_id: str, user_id: str
+    ) -> bool:
+        row = self._get_row(db, conversation_id, user_id, with_messages=False)
+        if not row:
+            return False
+        db.execute(delete(MessageRow).where(MessageRow.conversation_id == conversation_id))
+        db.delete(row)
+        db.commit()
+        return True
+
     def update_conversation_with_images(
         self,
+        db: Session,
         conversation_id: str,
         image_urls: List[str],
-        last_image_base64: Optional[str] = None
+        last_image_base64: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> None:
-        """Store generated image URLs and last image in the conversation context."""
-        conversation = self._conversations.get(conversation_id)
-        if conversation:
-            # Store the last generated image for follow-up edits
-            if last_image_base64:
-                conversation.last_generated_image = last_image_base64
-            
-            # Attach images to the last assistant message
-            if image_urls and conversation.messages:
-                # Find the last assistant message and create updated list
-                new_messages = []
-                found_assistant = False
-                
-                # Go through messages in reverse to find last assistant
-                for i in range(len(conversation.messages) - 1, -1, -1):
-                    msg = conversation.messages[i]
-                    if msg.role == MessageRole.ASSISTANT and not found_assistant:
-                        # Create new message with image URLs (use ||| separator - commas exist in base64!)
-                        new_messages.insert(0, ChatMessage(
-                            role=msg.role,
-                            content=msg.content,
-                            image_url="|||".join(image_urls),
-                            timestamp=msg.timestamp
-                        ))
-                        found_assistant = True
-                        print(f"[ConversationService] Attached {len(image_urls)} images to assistant message")
-                    else:
-                        new_messages.insert(0, msg)
-                
-                # Replace the messages list
-                conversation.messages = new_messages
-            
-            # Save to JSON storage
-            self._save_conversation(conversation)
-            print(f"[ConversationService] Saved conversation with images")
-    
-    def get_last_generated_image(self, conversation_id: str) -> Optional[str]:
-        """Get the last generated image base64 for follow-up edits."""
-        conversation = self._conversations.get(conversation_id)
-        if conversation:
-            return getattr(conversation, 'last_generated_image', None)
-        return None
-    
-    def store_original_image(self, conversation_id: str, image_base64: str) -> None:
-        """Store the original uploaded image for reference."""
-        conversation = self._conversations.get(conversation_id)
-        if conversation:
-            conversation.original_image = image_base64
-            self._save_conversation(conversation)
+        row = self._get_row(db, conversation_id, user_id)
+        if not row:
+            return
 
-    def get_original_image(self, conversation_id: str) -> Optional[str]:
-        """Get the original uploaded image base64 for follow-up edits."""
-        conversation = self._conversations.get(conversation_id)
-        if conversation:
-            return getattr(conversation, "original_image", None)
-        return None
-    
-    def store_mesh_reference(self, conversation_id: str, mesh_id: str) -> None:
-        """Store the mesh ID associated with this conversation."""
-        conversation = self._conversations.get(conversation_id)
-        if conversation:
-            conversation.mesh_id = mesh_id
-            self._save_conversation(conversation)
-            print(f"[ConversationService] Stored mesh {mesh_id} for conversation {conversation_id}")
-    
-    def get_mesh_id(self, conversation_id: str) -> Optional[str]:
-        """Get the mesh ID associated with a conversation."""
-        conversation = self._conversations.get(conversation_id)
-        if conversation:
-            return getattr(conversation, 'mesh_id', None)
-        return None
-    
-    def has_mesh(self, conversation_id: str) -> bool:
-        """Check if a conversation has an associated mesh."""
-        return self.get_mesh_id(conversation_id) is not None
+        if last_image_base64:
+            row.last_generated_image = last_image_base64
+
+        if image_urls and row.messages:
+            for msg in reversed(row.messages):
+                if msg.role == MessageRole.ASSISTANT.value:
+                    msg.image_url = "|||".join(image_urls)
+                    print(
+                        f"[ConversationService] Attached {len(image_urls)} images "
+                        f"to assistant message"
+                    )
+                    break
+
+        row.updated_at = datetime.utcnow()
+        db.commit()
+        print("[ConversationService] Saved conversation with images")
+
+    def get_last_generated_image(
+        self, db: Session, conversation_id: str, user_id: Optional[str] = None
+    ) -> Optional[str]:
+        row = self._get_row(db, conversation_id, user_id, with_messages=False)
+        return row.last_generated_image if row else None
+
+    def store_original_image(
+        self,
+        db: Session,
+        conversation_id: str,
+        image_base64: str,
+        user_id: Optional[str] = None,
+    ) -> None:
+        row = self._get_row(db, conversation_id, user_id, with_messages=False)
+        if row:
+            row.original_image = image_base64
+            row.updated_at = datetime.utcnow()
+            db.commit()
+
+    def get_original_image(
+        self, db: Session, conversation_id: str, user_id: Optional[str] = None
+    ) -> Optional[str]:
+        row = self._get_row(db, conversation_id, user_id, with_messages=False)
+        return row.original_image if row else None
+
+    def store_mesh_reference(
+        self,
+        db: Session,
+        conversation_id: str,
+        mesh_id: str,
+        user_id: Optional[str] = None,
+    ) -> None:
+        row = self._get_row(db, conversation_id, user_id, with_messages=False)
+        if row:
+            row.mesh_id = mesh_id
+            row.updated_at = datetime.utcnow()
+            db.commit()
+            print(
+                f"[ConversationService] Stored mesh {mesh_id} "
+                f"for conversation {conversation_id}"
+            )
+
+    def get_mesh_id(
+        self, db: Session, conversation_id: str, user_id: Optional[str] = None
+    ) -> Optional[str]:
+        row = self._get_row(db, conversation_id, user_id, with_messages=False)
+        return row.mesh_id if row else None
+
+    def has_mesh(
+        self, db: Session, conversation_id: str, user_id: Optional[str] = None
+    ) -> bool:
+        return self.get_mesh_id(db, conversation_id, user_id) is not None
 
 
-# Singleton instance
 conversation_service = ConversationService()

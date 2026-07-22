@@ -1,200 +1,133 @@
 """
-ReimagineAI - User Service
-Manages user authentication with JSON file persistence
+ReimagineAI - User Service (PostgreSQL)
 """
-from typing import Optional, Dict
+from __future__ import annotations
+
 from datetime import datetime
-import uuid
+from typing import Dict, Optional
 import hashlib
 import secrets
-from .json_storage import json_storage
+import uuid
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from ..db.models import User
 
 
 class UserService:
-    """
-    User authentication service with JSON file persistence.
-    Simple implementation for development - replace with proper auth in production.
-    """
-    
-    def __init__(self):
-        print("[UserService] Initialized with JSON storage")
-    
+    """User authentication persisted in PostgreSQL."""
+
     def _hash_password(self, password: str, salt: Optional[str] = None) -> tuple[str, str]:
-        """Hash a password with salt."""
         if salt is None:
             salt = secrets.token_hex(16)
-        
-        # Simple SHA-256 hashing (use bcrypt in production!)
         password_hash = hashlib.sha256(f"{password}{salt}".encode()).hexdigest()
         return password_hash, salt
-    
+
     def _verify_password(self, password: str, stored_hash: str, salt: str) -> bool:
-        """Verify a password against stored hash."""
         computed_hash, _ = self._hash_password(password, salt)
-        return computed_hash == stored_hash
-    
+        return secrets.compare_digest(computed_hash, stored_hash)
+
     def _generate_token(self) -> str:
-        """Generate a simple auth token."""
         return secrets.token_urlsafe(32)
-    
-    def signup(self, username: str, email: str, password: str) -> Dict:
-        """
-        Register a new user.
-        Returns user data with token on success.
-        Raises ValueError on validation errors.
-        """
-        # Validate input
+
+    def _public_user(self, user: User, include_token: bool = False) -> Dict:
+        data = {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+        }
+        if include_token:
+            data["token"] = user.token
+        return data
+
+    def signup(self, db: Session, username: str, email: str, password: str) -> Dict:
         if not username or len(username) < 3:
             raise ValueError("Username must be at least 3 characters")
-        
-        if not email or '@' not in email:
+        if not email or "@" not in email:
             raise ValueError("Invalid email address")
-        
         if not password or len(password) < 6:
             raise ValueError("Password must be at least 6 characters")
-        
-        # Check if email already exists
-        existing_user = json_storage.get_user_by_email(email)
-        if existing_user:
+
+        email_norm = email.lower().strip()
+        if db.scalar(select(User).where(User.email == email_norm)):
             raise ValueError("Email already registered")
-        
-        # Check if username already exists
-        existing_user = json_storage.get_user_by_username(username)
-        if existing_user:
+        if db.scalar(select(User).where(User.username == username)):
             raise ValueError("Username already taken")
-        
-        # Create user
-        user_id = f"user_{uuid.uuid4().hex[:12]}"
+
         password_hash, salt = self._hash_password(password)
-        token = self._generate_token()
-        
-        user_data = {
-            'id': user_id,
-            'username': username,
-            'email': email.lower(),
-            'password_hash': password_hash,
-            'salt': salt,
-            'token': token,
-            'created_at': datetime.utcnow().isoformat(),
-            'updated_at': datetime.utcnow().isoformat()
-        }
-        
-        # Save to JSON storage
-        json_storage.save_user(user_id, user_data)
-        
-        print(f"[UserService] New user registered: {username} ({email})")
-        
-        # Return safe user data (no password hash)
-        return {
-            'id': user_id,
-            'username': username,
-            'email': email.lower(),
-            'token': token,
-            'created_at': user_data['created_at']
-        }
-    
-    def login(self, email: str, password: str) -> Dict:
-        """
-        Authenticate a user.
-        Returns user data with token on success.
-        Raises ValueError on auth errors.
-        """
+        user = User(
+            id=f"user_{uuid.uuid4().hex[:12]}",
+            username=username,
+            email=email_norm,
+            password_hash=password_hash,
+            salt=salt,
+            token=self._generate_token(),
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        print(f"[UserService] New user registered: {username} ({email_norm})")
+        return self._public_user(user, include_token=True)
+
+    def login(self, db: Session, email: str, password: str) -> Dict:
         if not email or not password:
             raise ValueError("Email and password are required")
-        
-        # Find user by email
-        user = json_storage.get_user_by_email(email)
-        if not user:
+
+        user = db.scalar(select(User).where(User.email == email.lower().strip()))
+        if not user or not self._verify_password(password, user.password_hash, user.salt):
             raise ValueError("Invalid email or password")
-        
-        # Verify password
-        if not self._verify_password(password, user['password_hash'], user['salt']):
-            raise ValueError("Invalid email or password")
-        
-        # Generate new token on login
-        token = self._generate_token()
-        user['token'] = token
-        user['updated_at'] = datetime.utcnow().isoformat()
-        
-        # Update user in storage
-        json_storage.save_user(user['id'], user)
-        
-        print(f"[UserService] User logged in: {user['username']}")
-        
-        # Return safe user data
-        return {
-            'id': user['id'],
-            'username': user['username'],
-            'email': user['email'],
-            'token': token,
-            'created_at': user['created_at']
-        }
-    
-    def verify_token(self, token: str) -> Optional[Dict]:
-        """
-        Verify an auth token and return user data.
-        Returns None if token is invalid.
-        """
+
+        user.token = self._generate_token()
+        user.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(user)
+        print(f"[UserService] User logged in: {user.username}")
+        return self._public_user(user, include_token=True)
+
+    def verify_token(self, db: Session, token: str) -> Optional[Dict]:
         if not token:
             return None
-        
-        users = json_storage.get_all_users()
-        for user in users.values():
-            if user.get('token') == token:
-                return {
-                    'id': user['id'],
-                    'username': user['username'],
-                    'email': user['email']
-                }
-        
-        return None
-    
-    def get_user(self, user_id: str) -> Optional[Dict]:
-        """Get user by ID (safe data only)."""
-        user = json_storage.get_user_by_id(user_id)
-        if user:
-            return {
-                'id': user['id'],
-                'username': user['username'],
-                'email': user['email'],
-                'created_at': user['created_at']
-            }
-        return None
-    
-    def update_password(self, user_id: str, old_password: str, new_password: str) -> bool:
-        """Update user password."""
-        user = json_storage.get_user_by_id(user_id)
+        user = db.scalar(select(User).where(User.token == token))
+        if not user:
+            return None
+        return {"id": user.id, "username": user.username, "email": user.email}
+
+    def get_user(self, db: Session, user_id: str) -> Optional[Dict]:
+        user = db.get(User, user_id)
+        if not user:
+            return None
+        return self._public_user(user)
+
+    def update_password(
+        self, db: Session, user_id: str, old_password: str, new_password: str
+    ) -> bool:
+        user = db.get(User, user_id)
         if not user:
             raise ValueError("User not found")
-        
-        # Verify old password
-        if not self._verify_password(old_password, user['password_hash'], user['salt']):
+        if not self._verify_password(old_password, user.password_hash, user.salt):
             raise ValueError("Current password is incorrect")
-        
         if len(new_password) < 6:
             raise ValueError("New password must be at least 6 characters")
-        
-        # Hash new password
+
         password_hash, salt = self._hash_password(new_password)
-        user['password_hash'] = password_hash
-        user['salt'] = salt
-        user['updated_at'] = datetime.utcnow().isoformat()
-        
-        # Save updated user
-        json_storage.save_user(user_id, user)
-        
+        user.password_hash = password_hash
+        user.salt = salt
+        user.updated_at = datetime.utcnow()
+        db.commit()
         return True
-    
-    def logout(self, user_id: str) -> bool:
-        """Logout user by invalidating token."""
-        user = json_storage.get_user_by_id(user_id)
-        if user:
-            user['token'] = None
-            user['updated_at'] = datetime.utcnow().isoformat()
-            json_storage.save_user(user_id, user)
-            return True
-        return False
+
+    def logout(self, db: Session, user_id: str) -> bool:
+        user = db.get(User, user_id)
+        if not user:
+            return False
+        user.token = None
+        user.updated_at = datetime.utcnow()
+        db.commit()
+        return True
 
 
-# Singleton instance
 user_service = UserService()

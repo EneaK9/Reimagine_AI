@@ -22,6 +22,15 @@ async def lifespan(app: FastAPI):
     # Startup
     print(f"[START] Starting {settings.app_name} v{settings.app_version}")
     print(f"[INFO] Debug mode: {settings.debug}")
+
+    try:
+        from .db.session import init_db
+
+        init_db()
+        print("[OK] PostgreSQL ready")
+    except Exception as e:
+        print(f"[ERROR] Database init failed: {e}")
+        raise
     
     # Check OpenAI API key
     if not settings.openai_api_key:
