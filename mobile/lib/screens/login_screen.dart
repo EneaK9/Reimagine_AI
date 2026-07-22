@@ -118,17 +118,23 @@ class _LoginScreenState extends State<LoginScreen> {
               child: _isSignup
                   ? const AuthArtPanel(
                       key: ValueKey('signup-art'),
-                      quote: 'Design\nThe Space\nYou Love',
+                      imageAsset: 'assets/images/signup_art.png',
+                      alignEnd: true,
+                      eyebrow: 'START YOUR ROOM',
+                      quote: 'Design\nthe space\nyou love',
                       caption:
-                          'Every great room starts with a single idea.\n'
-                          'Bring yours to life with the help of AI.',
+                          'Upload a photo, describe the look, and let AI '
+                          'reshape your room — saved to your account.',
                     )
                   : const AuthArtPanel(
                       key: ValueKey('login-art'),
-                      quote: 'Get\nEverything\nYou Want',
+                      imageAsset: 'assets/images/login_art.png',
+                      alignEnd: false,
+                      eyebrow: 'REIMAGINE YOUR SPACE',
+                      quote: 'See your\nroom,\nreimagined',
                       caption:
-                          'You can get everything you want if you work hard,\n'
-                          'trust the process, and stick to the plan.',
+                          'Pick up where you left off. Your chats, edits, '
+                          'and designs stay with you.',
                     ),
             ),
           ),

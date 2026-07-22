@@ -206,7 +206,7 @@ class _SignupFormState extends State<SignupForm> {
             value: _agreeToTerms,
             onChanged: (value) =>
                 setState(() => _agreeToTerms = value ?? false),
-            activeColor: AppTheme.ink,
+            activeColor: AppTheme.primaryColor,
             side: const BorderSide(color: AppTheme.authBorder, width: 1.4),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(4),
@@ -229,19 +229,19 @@ class _SignupFormState extends State<SignupForm> {
                   const TextSpan(text: 'I agree to the '),
                   TextSpan(
                     text: 'Terms of Service',
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.interTight(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.ink,
+                      color: AppTheme.primaryColor,
                     ),
                   ),
                   const TextSpan(text: ' and '),
                   TextSpan(
                     text: 'Privacy Policy',
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.interTight(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.ink,
+                      color: AppTheme.primaryColor,
                     ),
                   ),
                 ],
@@ -302,10 +302,10 @@ class _SignupFormState extends State<SignupForm> {
           ),
           child: Text(
             'Sign In',
-            style: GoogleFonts.dmSans(
+            style: GoogleFonts.interTight(
               fontSize: 13.5,
               fontWeight: FontWeight.w600,
-              color: AppTheme.ink,
+              color: AppTheme.primaryColor,
             ),
           ),
         ),

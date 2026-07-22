@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../theme/app_theme.dart';
 
-/// Solid black primary button used on auth screens.
+/// Primary CTA — same orange as the studio / landing.
 class PrimaryAuthButton extends StatelessWidget {
   const PrimaryAuthButton({
     super.key,
@@ -23,11 +23,10 @@ class PrimaryAuthButton extends StatelessWidget {
       child: ElevatedButton(
         onPressed: loading ? null : onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: AppTheme.ink,
+          backgroundColor: AppTheme.primaryColor,
           foregroundColor: Colors.white,
-          // White overlay so hover visibly lightens the black button.
           overlayColor: Colors.white,
-          disabledBackgroundColor: AppTheme.ink.withValues(alpha: 0.6),
+          disabledBackgroundColor: AppTheme.primaryColor.withValues(alpha: 0.55),
           disabledForegroundColor: Colors.white70,
           elevation: 0,
           shape: RoundedRectangleBorder(
@@ -47,7 +46,7 @@ class PrimaryAuthButton extends StatelessWidget {
                 )
               : Text(
                   label,
-                  style: GoogleFonts.dmSans(
+                  style: GoogleFonts.interTight(
                     fontSize: 14.5,
                     fontWeight: FontWeight.w600,
                   ),
@@ -97,7 +96,7 @@ class OutlinedAuthButton extends StatelessWidget {
             ],
             Text(
               label,
-              style: GoogleFonts.dmSans(
+              style: GoogleFonts.interTight(
                 fontSize: 14.5,
                 fontWeight: FontWeight.w500,
               ),

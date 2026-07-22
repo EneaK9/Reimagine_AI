@@ -136,8 +136,6 @@ class _LoginFormState extends State<LoginForm> {
             ),
             const SizedBox(height: 64),
             _buildSignupLink(),
-            const SizedBox(height: 4),
-            _buildSkipButton(),
           ],
         ),
       ),
@@ -154,7 +152,7 @@ class _LoginFormState extends State<LoginForm> {
             value: _rememberMe,
             onChanged: (value) =>
                 setState(() => _rememberMe = value ?? false),
-            activeColor: AppTheme.ink,
+            activeColor: AppTheme.primaryColor,
             side: const BorderSide(color: AppTheme.authBorder, width: 1.4),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(4),
@@ -184,10 +182,10 @@ class _LoginFormState extends State<LoginForm> {
           ),
           child: Text(
             'Forgot Password',
-            style: GoogleFonts.dmSans(
+            style: GoogleFonts.interTight(
               fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: AppTheme.ink,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.primaryColor,
             ),
           ),
         ),
@@ -244,36 +242,14 @@ class _LoginFormState extends State<LoginForm> {
           ),
           child: Text(
             'Sign Up',
-            style: GoogleFonts.dmSans(
+            style: GoogleFonts.interTight(
               fontSize: 13.5,
               fontWeight: FontWeight.w600,
-              color: AppTheme.ink,
+              color: AppTheme.primaryColor,
             ),
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildSkipButton() {
-    return Center(
-      child: TextButton(
-        onPressed: () {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const ChatScreen()),
-          );
-        },
-        style: TextButton.styleFrom(overlayColor: Colors.transparent),
-        child: Text(
-          'Skip for now →',
-          style: GoogleFonts.dmSans(
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-            color: AppTheme.authMuted,
-          ),
-        ),
-      ),
     );
   }
 }
@@ -287,13 +263,13 @@ class AuthBrand extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const Icon(Icons.home_rounded, size: 22, color: AppTheme.ink),
+        const Icon(Icons.home_rounded, size: 22, color: AppTheme.primaryColor),
         const SizedBox(width: 8),
         Text(
           'ReimagineAI',
-          style: GoogleFonts.dmSans(
+          style: GoogleFonts.interTight(
             fontSize: 17,
-            fontWeight: FontWeight.w600,
+            fontWeight: FontWeight.w700,
             color: AppTheme.ink,
           ),
         ),

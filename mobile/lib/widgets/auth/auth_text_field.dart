@@ -67,7 +67,8 @@ class _AuthTextFieldState extends State<AuthTextField> {
               vertical: 15,
             ),
             constraints: const BoxConstraints(minHeight: AppTheme.buttonHeight),
-            focusedBorder: AppTheme.fieldBorder(color: AppTheme.ink, width: 1.2),
+            focusedBorder:
+                AppTheme.fieldBorder(color: AppTheme.primaryColor, width: 1.5),
             suffixIcon: widget.obscurable
                 ? IconButton(
                     tooltip: _obscured ? 'Show password' : 'Hide password',
