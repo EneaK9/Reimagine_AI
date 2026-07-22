@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../screens/legal_document_screen.dart';
 import '../../../theme/app_theme.dart';
 import '../circle_arrow_button.dart';
 import '../decorations.dart';
@@ -115,7 +116,24 @@ class FooterCta extends StatelessWidget {
                           ),
                         ],
                       ),
-                const SizedBox(height: 64),
+                const SizedBox(height: 40),
+                Wrap(
+                  spacing: 20,
+                  runSpacing: 8,
+                  children: [
+                    _legalLink(
+                      context,
+                      'Privacy Policy',
+                      const PrivacyPolicyScreen(),
+                    ),
+                    _legalLink(
+                      context,
+                      'Terms of Service',
+                      const TermsOfServiceScreen(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 40),
                 Align(
                   alignment: Alignment.centerRight,
                   child: Opacity(
@@ -156,6 +174,30 @@ class FooterCta extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _legalLink(BuildContext context, String label, Widget screen) {
+    return TextButton(
+      onPressed: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => screen),
+        );
+      },
+      style: TextButton.styleFrom(
+        padding: EdgeInsets.zero,
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        overlayColor: Colors.transparent,
+        foregroundColor: AppTheme.primaryColor,
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.interTight(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }

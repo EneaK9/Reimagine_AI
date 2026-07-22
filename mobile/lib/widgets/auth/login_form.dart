@@ -5,6 +5,7 @@ import '../../providers/auth_provider.dart';
 import '../../screens/chat_screen.dart';
 import '../../theme/app_theme.dart';
 import 'auth_buttons.dart';
+import 'auth_legal_links.dart';
 import 'auth_text_field.dart';
 
 /// Login form column - used inside the animated auth screen.
@@ -136,6 +137,8 @@ class _LoginFormState extends State<LoginForm> {
             ),
             const SizedBox(height: 64),
             _buildSignupLink(),
+            const SizedBox(height: 28),
+            const AuthLegalLinks(),
           ],
         ),
       ),

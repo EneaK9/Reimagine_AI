@@ -1,10 +1,13 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../screens/chat_screen.dart';
+import '../../screens/legal_document_screen.dart';
 import '../../theme/app_theme.dart';
 import 'auth_buttons.dart';
+import 'auth_legal_links.dart';
 import 'auth_text_field.dart';
 import 'login_form.dart' show AuthBrand;
 
@@ -27,8 +30,32 @@ class _SignupFormState extends State<SignupForm> {
   final _confirmPasswordController = TextEditingController();
   bool _agreeToTerms = false;
 
+  late final TapGestureRecognizer _termsTap;
+  late final TapGestureRecognizer _privacyTap;
+  late final TapGestureRecognizer _agreeTap;
+
+  @override
+  void initState() {
+    super.initState();
+    _termsTap = TapGestureRecognizer()
+      ..onTap = () => _openLegal(const TermsOfServiceScreen());
+    _privacyTap = TapGestureRecognizer()
+      ..onTap = () => _openLegal(const PrivacyPolicyScreen());
+    _agreeTap = TapGestureRecognizer()
+      ..onTap = () => setState(() => _agreeToTerms = !_agreeToTerms);
+  }
+
+  void _openLegal(Widget screen) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => screen),
+    );
+  }
+
   @override
   void dispose() {
+    _termsTap.dispose();
+    _privacyTap.dispose();
+    _agreeTap.dispose();
     _usernameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
@@ -189,6 +216,8 @@ class _SignupFormState extends State<SignupForm> {
             ),
             const SizedBox(height: 48),
             _buildLoginLink(),
+            const SizedBox(height: 28),
+            const AuthLegalLinks(),
           ],
         ),
       ),
@@ -216,36 +245,38 @@ class _SignupFormState extends State<SignupForm> {
         ),
         const SizedBox(width: 10),
         Expanded(
-          child: GestureDetector(
-            onTap: () => setState(() => _agreeToTerms = !_agreeToTerms),
-            child: RichText(
-              text: TextSpan(
-                style: GoogleFonts.dmSans(
-                  fontSize: 13,
-                  color: AppTheme.authMuted,
-                  height: 1.4,
-                ),
-                children: [
-                  const TextSpan(text: 'I agree to the '),
-                  TextSpan(
-                    text: 'Terms of Service',
-                    style: GoogleFonts.interTight(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.primaryColor,
-                    ),
-                  ),
-                  const TextSpan(text: ' and '),
-                  TextSpan(
-                    text: 'Privacy Policy',
-                    style: GoogleFonts.interTight(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.primaryColor,
-                    ),
-                  ),
-                ],
+          child: RichText(
+            text: TextSpan(
+              style: GoogleFonts.interTight(
+                fontSize: 13,
+                color: AppTheme.authMuted,
+                height: 1.4,
               ),
+              children: [
+                TextSpan(
+                  text: 'I agree to the ',
+                  recognizer: _agreeTap,
+                ),
+                TextSpan(
+                  text: 'Terms of Service',
+                  style: GoogleFonts.interTight(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primaryColor,
+                  ),
+                  recognizer: _termsTap,
+                ),
+                const TextSpan(text: ' and '),
+                TextSpan(
+                  text: 'Privacy Policy',
+                  style: GoogleFonts.interTight(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primaryColor,
+                  ),
+                  recognizer: _privacyTap,
+                ),
+              ],
             ),
           ),
         ),
