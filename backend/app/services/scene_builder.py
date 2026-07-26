@@ -62,8 +62,17 @@ Rules:
 - category must be a simple generic furniture type: sofa, armchair, chair, table,
   coffee_table, desk, bed, nightstand, wardrobe, dresser, bookshelf, tv, tv_stand,
   lamp_floor, lamp_table, rug, plant, mirror, ottoman, sideboard.
+- ONLY include free-standing furniture that sits on the floor (or on furniture,
+  like a table lamp on a nightstand).
+- DO include even partially visible or background items: potted plants,
+  nightstands, side tables, table lamps, floor lamps, benches, poufs, rugs.
+  Bedrooms usually have nightstands beside the bed — look carefully.
+- Do NOT include: curtains, drapes, blinds, windows, doors, wall art, picture
+  frames, posters, ceiling lights, pendant lamps, chandeliers, radiators,
+  shelves mounted on walls, pillows, blankets, or anything attached to a wall
+  or ceiling. These are part of the room, not furniture objects.
 - width_m is your best real-world width estimate in meters.
-- Include every clearly visible piece of furniture (max 15 objects).
+- Include every piece of floor furniture you can find (max 15 objects).
 - Ignore small decor (books, cups, frames).
 - colors are hex approximations of the item's dominant color.
 """
@@ -160,13 +169,14 @@ class SceneBuilder:
 
             entry = catalog_service.match(det.get("category", ""), det.get("width_m"))
             category = catalog_service.normalize_category(det.get("category", ""))
-            if entry:
-                dims = list(entry["dims_m"])
-                asset_ref = entry["id"]
-            else:
-                w_est = float(det.get("width_m") or 1.0)
-                dims = [w_est, 1.0, w_est * 0.6]
-                asset_ref = "generic_box"
+            if not entry:
+                # No catalog match (curtains, windows, unknown labels...):
+                # skip instead of rendering a meaningless box.
+                print(f"[SceneBuilder] Skipping unmatched detection: "
+                      f"{det.get('label')} ({det.get('category')})")
+                continue
+            dims = list(entry["dims_m"])
+            asset_ref = entry["id"]
 
             # Horizontal position from bbox center
             cx_norm = ((x0 + x1) / 2.0) / img_w  # 0..1 left→right

@@ -35,6 +35,23 @@ MAX_VERSIONS_KEPT = 50
 
 SHELL_TARGETS = {"wall", "walls", "floor", "ceiling"}
 
+# Common color names for the rule-based edit fast path
+COLOR_MAP = {
+    "black": "#1A1A1C", "white": "#F5F5F2", "grey": "#8E8E8E", "gray": "#8E8E8E",
+    "light grey": "#C9C9C9", "light gray": "#C9C9C9", "dark grey": "#4A4A4C",
+    "dark gray": "#4A4A4C", "red": "#B03A2E", "dark red": "#7B241C",
+    "blue": "#2E5A8F", "navy": "#1F3A5F", "navy blue": "#1F3A5F",
+    "light blue": "#7FA8D0", "sky blue": "#87BEE0", "teal": "#2E7F7A",
+    "green": "#3E7C4F", "dark green": "#2C5F3E", "forest green": "#2C5F3E",
+    "olive": "#6B7C3E", "sage": "#9CAF88", "mint": "#A8D5BA",
+    "yellow": "#D9B93B", "mustard": "#C9A227", "orange": "#C87533",
+    "brown": "#7C5E42", "dark brown": "#5A4030", "beige": "#D9CDB8",
+    "cream": "#EFE8D8", "tan": "#C8A97C", "pink": "#D98BA6", "purple": "#7B5EA7",
+    "violet": "#8A63B8", "gold": "#C9A227", "turquoise": "#40B5AD",
+    "burgundy": "#6E1E2B", "maroon": "#6E1E2B", "charcoal": "#36383B",
+    "ivory": "#F4EFE3", "off white": "#F0EBE0", "lavender": "#B9A7D9",
+}
+
 
 class SceneServiceError(ValueError):
     pass
@@ -281,8 +298,55 @@ class SceneService:
 
     # ---------- natural-language editing ----------
 
+    def _rule_based_shell_ops(self, instruction: str) -> List[SceneOp]:
+        """
+        Deterministic fast path for wall/floor/ceiling recolors
+        ("make the walls black") — too important to leave to the LLM.
+        Returns ops only when the WHOLE instruction is shell recolors.
+        """
+        import re
+
+        text = instruction.lower().strip()
+        shell_words = {"wall": "wall", "walls": "wall", "floor": "floor", "ceiling": "ceiling"}
+        # Bail out if any furniture-ish word appears — let the LLM handle it
+        mentions_other = re.search(
+            r"\b(sofa|couch|chair|table|bed|lamp|rug|plant|mirror|shelf|shelves|"
+            r"wardrobe|dresser|desk|tv|ottoman|furniture|move|swap|remove|add|rotate)\b",
+            text,
+        )
+        if mentions_other:
+            return []
+
+        ops: List[SceneOp] = []
+        # Segment on "and" / commas so "walls black and floor white" works
+        for segment in re.split(r"\band\b|,|;", text):
+            target = next(
+                (canon for word, canon in shell_words.items()
+                 if re.search(rf"\b{word}\b", segment)),
+                None,
+            )
+            if not target:
+                continue
+            # Longest color names first ("navy blue" before "blue")
+            for name in sorted(COLOR_MAP, key=len, reverse=True):
+                if name in segment:
+                    ops.append(SceneOp(op="recolor", target=target,
+                                       value={"color": COLOR_MAP[name]}))
+                    break
+            else:
+                hex_match = re.search(r"#[0-9a-f]{6}", segment)
+                if hex_match:
+                    ops.append(SceneOp(op="recolor", target=target,
+                                       value={"color": hex_match.group(0).upper()}))
+        return ops
+
     async def parse_nl_edit(self, data: dict, instruction: str) -> List[SceneOp]:
         """Turn 'make the sofa navy and move it to the back wall' into SceneOps."""
+        # Deterministic path for pure shell recolors
+        rule_ops = self._rule_based_shell_ops(instruction)
+        if rule_ops:
+            print(f"[SceneService] Rule-based shell edit: {len(rule_ops)} op(s)")
+            return rule_ops
         objects_desc = [
             {
                 "id": o["id"],
@@ -307,7 +371,7 @@ Objects currently in the scene:
 
 Available catalog asset ids (for swap/add): {catalog_ids}
 
-Return ONLY a JSON array of operations, no prose. Each operation is one of:
+Return ONLY a JSON object {{"ops": [...]}} with no prose. Each operation is one of:
 {{"op":"move","target":"<object id>","value":{{"pos":[x,0,z]}}}}
 {{"op":"rotate","target":"<object id>","value":{{"rot_y_deg":90}}}}
 {{"op":"recolor","target":"<object id or wall/floor/ceiling>","value":{{"color":"#1F3A5F"}}}}
@@ -316,12 +380,19 @@ Return ONLY a JSON array of operations, no prose. Each operation is one of:
 {{"op":"add","value":{{"object":{{"id":"<category>_new1","category":"<category>","label":"<name>","asset":{{"type":"catalog","ref":"<catalog id>"}},"transform":{{"pos":[x,0,z],"rot_y_deg":0,"scale":[1,1,1]}},"dimensions_m":[w,h,d]}}}}}}
 {{"op":"set_room","value":{{"wall_color":"#EEE8DD"}}}}
 
-Rules:
-- target MUST be an exact object id from the list above (or wall/floor/ceiling).
+CRITICAL rules:
+- When the user says "wall"/"walls", target is EXACTLY "wall". "floor" -> "floor",
+  "ceiling" -> "ceiling". NEVER apply a wall/floor/ceiling request to furniture.
+- Otherwise target MUST be an exact object id from the list above.
 - Colors as hex. "navy" -> "#1F3A5F", "forest green" -> "#2C5F3E", etc.
 - Keep positions inside the room bounds.
 - If the request is ambiguous, choose the most likely single interpretation.
-- If the request cannot be done, return []."""
+- If the request cannot be done, return {{"ops": []}}.
+
+Examples:
+"make the walls black" -> {{"ops":[{{"op":"recolor","target":"wall","value":{{"color":"#1A1A1C"}}}}]}}
+"make the bed blue and move it to the back wall" (bed id bed_a1b2c3, room depth 4) ->
+{{"ops":[{{"op":"recolor","target":"bed_a1b2c3","value":{{"color":"#2E5A8F"}}}},{{"op":"move","target":"bed_a1b2c3","value":{{"pos":[0,0,-0.9]}}}}]}}"""
 
         response = await openai_service.client.chat.completions.create(
             model=settings.gpt_model,
@@ -330,18 +401,12 @@ Rules:
                 {"role": "user", "content": instruction},
             ],
             max_tokens=1200,
-            temperature=0.1,
+            temperature=0.0,
+            response_format={"type": "json_object"},
         )
         text = response.choices[0].message.content.strip()
-        # Strip fences and locate the JSON array
-        if text.startswith("```"):
-            text = text.strip("`")
-            if text.startswith("json"):
-                text = text[4:]
-        start, end = text.find("["), text.rfind("]")
-        if start < 0 or end <= start:
-            return []
-        raw_ops = json.loads(text[start:end + 1])
+        parsed = json.loads(text)
+        raw_ops = parsed.get("ops", parsed if isinstance(parsed, list) else [])
         return [SceneOp.model_validate(o) for o in raw_ops]
 
     async def nl_edit(
