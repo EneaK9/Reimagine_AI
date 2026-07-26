@@ -89,6 +89,23 @@ app.include_router(depth.router, prefix="/api/v1")
 app.include_router(scenes.router, prefix="/api/v1")
 
 
+# ============ 3D Editor (static) ============
+
+@app.get("/editor", tags=["3D Scenes"])
+async def editor_page():
+    """
+    Interactive 3D room editor (three.js).
+    - Mobile app embeds it in a WebView (JS-bridge mode).
+    - Flutter web opens it in a new tab as /editor?scene_id=...&token=...
+      (standalone mode: the page talks to the API directly).
+    """
+    import os
+    from fastapi.responses import FileResponse
+
+    path = os.path.join(os.path.dirname(__file__), "static", "editor.html")
+    return FileResponse(path, media_type="text/html")
+
+
 # ============ Root Endpoints ============
 
 @app.get("/", tags=["Root"])

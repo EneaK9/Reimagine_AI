@@ -11,7 +11,7 @@ import '../widgets/conversation_sidebar.dart';
 import '../widgets/landing/decorations.dart';
 import '../theme/app_theme.dart';
 import 'room_scan_screen.dart';
-import 'scene_editor_screen.dart';
+import '../utils/scene_editor_launcher.dart';
 
 /// Design studio — mobile uses a compact drawer layout; web uses a
 /// desktop shell with a persistent sidebar and a distinct home canvas.
@@ -163,12 +163,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void _openSceneEditor() {
     final sceneId = context.read<ChatProvider>().currentSceneId;
     if (sceneId == null) return;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => SceneEditorScreen(sceneId: sceneId),
-      ),
-    );
+    openSceneEditor(context, sceneId: sceneId);
   }
 
   // ---------------------------------------------------------------------------

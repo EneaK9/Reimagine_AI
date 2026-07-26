@@ -8,9 +8,9 @@ import '../theme/app_theme.dart';
 import '../services/api_service.dart';
 import '../providers/chat_provider.dart';
 import '../providers/scene_provider.dart';
+import '../utils/scene_editor_launcher.dart';
 import '../widgets/platform_image.dart';
 import 'chat_screen.dart';
-import 'scene_editor_screen.dart';
 
 /// Quick Scan Screen - Photo to 3D using depth estimation
 /// Replaces the Unity-based AR scanning with a simpler photo-based approach
@@ -142,10 +142,7 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
       await sceneProvider.setGeneratedScene(sceneResponse);
 
       if (!mounted) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (context) => const SceneEditorScreen()),
-      );
+      await openSceneEditor(context);
     } catch (e) {
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(

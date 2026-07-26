@@ -44,6 +44,9 @@ dependencies:
 
   # WebView hosting the interactive three.js room editor
   flutter_inappwebview: ^6.1.5
+
+  # Open the 3D editor in a browser tab on Flutter web
+  url_launcher: ^6.3.0
   
   # File handling for 3D models
   path_provider: ^2.1.0
@@ -76,7 +79,6 @@ flutter:
   assets:
     - assets/images/
     - assets/images/landing/
-    - assets/editor/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

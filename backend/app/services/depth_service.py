@@ -67,12 +67,20 @@ class DepthService:
         
         # Load MiDaS model - DPT_Hybrid is a good balance of speed and quality
         # Other options: "DPT_Large" (better quality), "MiDaS_small" (faster)
-        self.model = torch.hub.load("intel-isl/MiDaS", "DPT_Hybrid")
+        # trust_repo=True: the server has no stdin, so torch.hub's interactive
+        # trust prompt would crash with "EOF when reading a line".
+        # skip_validation=True: avoids a GitHub API call that fails with
+        # 403 rate-limit errors on anonymous requests.
+        self.model = torch.hub.load(
+            "intel-isl/MiDaS", "DPT_Hybrid", trust_repo=True, skip_validation=True
+        )
         self.model.to(self.device)
         self.model.eval()
-        
+
         # Load transforms
-        midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
+        midas_transforms = torch.hub.load(
+            "intel-isl/MiDaS", "transforms", trust_repo=True, skip_validation=True
+        )
         self.transform = midas_transforms.dpt_transform
         
         self._initialized = True

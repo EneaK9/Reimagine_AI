@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import '../config/api_config.dart';
 import '../providers/scene_provider.dart';
 import '../theme/app_theme.dart';
 
@@ -154,7 +155,9 @@ class _SceneEditorScreenState extends State<SceneEditorScreen> {
       body: Stack(
         children: [
           InAppWebView(
-            initialFile: 'assets/editor/editor.html',
+            initialUrlRequest: URLRequest(
+              url: WebUri('${ApiConfig.baseUrl}/editor'),
+            ),
             initialSettings: InAppWebViewSettings(
               transparentBackground: true,
               allowFileAccessFromFileURLs: true,
