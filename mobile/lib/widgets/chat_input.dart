@@ -1,10 +1,12 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import '../theme/app_theme.dart';
 import 'app_control.dart';
 import 'platform_image.dart';
+import 'web_camera/web_camera_capture.dart';
 
 /// Design-studio composer. Styling comes from [AppTheme] / ThemeData.
 class ChatInput extends StatefulWidget {
@@ -67,11 +69,22 @@ class ChatInputState extends State<ChatInput> {
 
   Future<void> _pickImage(ImageSource source) async {
     try {
+      // Desktop browsers can't open a real camera via image_picker —
+      // they fall back to a file dialog. Use getUserMedia on web instead.
+      if (source == ImageSource.camera && kIsWeb && supportsWebcamCapture) {
+        final blobUrl = await capturePhotoWithWebcam(context);
+        if (blobUrl != null && mounted) {
+          widget.onImageSelected(File(blobUrl));
+        }
+        return;
+      }
+
       final XFile? image = await _picker.pickImage(
         source: source,
         maxWidth: 1920,
         maxHeight: 1920,
         imageQuality: 85,
+        preferredCameraDevice: CameraDevice.rear,
       );
       if (image != null) {
         widget.onImageSelected(File(image.path));
@@ -123,7 +136,9 @@ class ChatInputState extends State<ChatInput> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Take a new photo or choose from gallery',
+                kIsWeb
+                    ? 'Use your webcam or upload a photo from your files'
+                    : 'Take a new photo or choose from gallery',
                 style: GoogleFonts.interTight(
                   fontSize: 13,
                   color: AppTheme.textMuted,
@@ -135,7 +150,7 @@ class ChatInputState extends State<ChatInput> {
                   Expanded(
                     child: _SourceOption(
                       icon: Icons.camera_alt_outlined,
-                      label: 'Camera',
+                      label: kIsWeb ? 'Webcam' : 'Camera',
                       onTap: () {
                         Navigator.pop(context);
                         _pickImage(ImageSource.camera);
@@ -146,7 +161,7 @@ class ChatInputState extends State<ChatInput> {
                   Expanded(
                     child: _SourceOption(
                       icon: Icons.photo_library_outlined,
-                      label: 'Gallery',
+                      label: kIsWeb ? 'Upload' : 'Gallery',
                       onTap: () {
                         Navigator.pop(context);
                         _pickImage(ImageSource.gallery);
