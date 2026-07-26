@@ -247,6 +247,14 @@ class SceneService:
         if not op.target:
             raise SceneServiceError(f"op '{kind}' requires a target")
 
+        # Wall features (windows/doors/curtains) addressed by id
+        if kind in ("recolor", "material"):
+            for feature in (data["room"].get("features") or []):
+                if feature["id"] == op.target:
+                    if "color" in value:
+                        feature["color"] = value["color"]
+                    return
+
         # Shell material edits addressed as wall/floor/ceiling
         if op.target.lower() in SHELL_TARGETS and kind in ("recolor", "material"):
             key = "wall_material" if op.target.lower().startswith("wall") else f"{op.target.lower()}_material"
@@ -295,6 +303,31 @@ class SceneService:
             data["objects"] = [o for o in data["objects"] if o["id"] != obj["id"]]
         else:
             raise SceneServiceError(f"Unknown op '{kind}'")
+
+    def update_asset_refs(
+        self,
+        db: Session,
+        scene_id: str,
+        asset_urls: Dict[str, str],
+        user_id: Optional[str] = None,
+    ) -> Optional["SceneResponse"]:
+        """Swap objects' assets to generated GLB URLs (one version bump)."""
+        row = self._get_row(db, scene_id, user_id)
+        if not row:
+            return None
+        data = copy.deepcopy(row.data)
+        for obj in data.get("objects", []):
+            url = asset_urls.get(obj["id"])
+            if url:
+                obj["asset"] = {"type": "url", "ref": url}
+        SceneData.model_validate(data)
+        self._snapshot(db, row)
+        row.data = data
+        row.version += 1
+        row.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(row)
+        return self._to_response(row)
 
     # ---------- natural-language editing ----------
 

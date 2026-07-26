@@ -21,10 +21,22 @@ from ..models.scene import (
 )
 from ..services.catalog_service import catalog_service
 from ..services.conversation_service import conversation_service
+from ..services.generation_service import generation_service
 from ..services.scene_builder import scene_builder
 from ..services.scene_service import SceneServiceError, scene_service
 
 router = APIRouter(prefix="/scenes", tags=["3D Scenes"])
+
+
+@router.get("/assets/{filename}")
+async def get_generated_asset(filename: str):
+    """Serve an AI-generated furniture GLB."""
+    from fastapi.responses import FileResponse
+
+    path = generation_service.asset_path(filename)
+    if not path:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return FileResponse(path, media_type="model/gltf-binary")
 
 
 @router.get("/catalog")
@@ -44,7 +56,7 @@ async def generate_scene(
     furniture detection + depth-based placement + catalog asset matching.
     """
     try:
-        data = await scene_builder.build_scene_from_image(request.image_base64)
+        data, resized_image = await scene_builder.build_scene_from_image(request.image_base64)
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -59,6 +71,12 @@ async def generate_scene(
         conversation_id=request.conversation_id,
         title=request.title,
     )
+
+    # Persist the photo so "Make realistic" can crop per-object images later
+    try:
+        generation_service.save_scene_image(scene.scene_id, resized_image)
+    except Exception as e:
+        print(f"[Scenes] Could not save scene image: {e}")
 
     if request.conversation_id:
         conversation_service.store_scene_reference(
@@ -164,6 +182,77 @@ async def revert_scene(
     if not scene:
         raise HTTPException(status_code=404, detail="Scene or version not found")
     return scene
+
+
+@router.post("/{scene_id}/enhance", response_model=SceneResponse)
+async def enhance_scene(
+    scene_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Replace procedural stand-in furniture with AI-generated 3D meshes:
+    each detected object is cropped from the original photo and run through
+    an image-to-3D model (fal.ai TRELLIS). Objects that fail keep their
+    procedural model. Requires FAL_API_KEY.
+    """
+    import asyncio
+
+    if not generation_service.enabled:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Image-to-3D generation is not configured. "
+                "Add FAL_API_KEY to backend/.env (get one at fal.ai) and restart."
+            ),
+        )
+
+    scene = scene_service.get_scene(db, scene_id, current_user["id"])
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    photo = generation_service.load_scene_image(scene_id)
+    if photo is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Original photo not available for this scene (regenerate the room first).",
+        )
+
+    # Only objects detected from the photo (with a bbox) can be generated
+    candidates = [
+        obj for obj in scene.data.objects
+        if obj.asset.type == "catalog"
+        and obj.source and obj.source.get("bbox")
+    ]
+    if not candidates:
+        raise HTTPException(status_code=400, detail="No photo-detected objects to enhance.")
+
+    semaphore = asyncio.Semaphore(3)
+
+    async def generate(obj):
+        x0, y0, x1, y1 = obj.source["bbox"]
+        # Pad the crop a little for context
+        pad_x, pad_y = int((x1 - x0) * 0.08), int((y1 - y0) * 0.08)
+        crop = photo.crop((
+            max(0, x0 - pad_x), max(0, y0 - pad_y),
+            min(photo.width, x1 + pad_x), min(photo.height, y1 + pad_y),
+        ))
+        async with semaphore:
+            url = await generation_service.image_to_glb(crop, label=obj.label)
+        return obj.id, url
+
+    results = await asyncio.gather(*(generate(o) for o in candidates))
+    asset_urls = {obj_id: url for obj_id, url in results if url}
+
+    if not asset_urls:
+        raise HTTPException(
+            status_code=502,
+            detail="3D generation failed for all objects — check the fal.ai key/quota.",
+        )
+
+    updated = scene_service.update_asset_refs(db, scene_id, asset_urls, current_user["id"])
+    print(f"[Scenes] Enhanced {len(asset_urls)}/{len(candidates)} objects in {scene_id}")
+    return updated
 
 
 @router.delete("/{scene_id}")

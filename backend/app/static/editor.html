@@ -31,6 +31,7 @@
   <div id="topbar" style="display:none; gap:8px; pointer-events:auto;">
     <button class="btn" id="undoBtn">↩ Undo</button>
     <button class="btn" id="aiBtn">✨ AI edit</button>
+    <button class="btn" id="genBtn">🪄 Realistic</button>
     <span id="saveState" style="color:#9C9284; font-size:12px; align-self:center;"></span>
   </div>
 </div>
@@ -161,10 +162,34 @@ async function standaloneAiEdit() {
   } catch (e) { setSaveState('AI edit failed'); console.error(e); }
 }
 
+async function standaloneEnhance() {
+  if (!window.confirm('Generate realistic 3D models of your furniture from the photo? This takes 1-3 minutes.')) return;
+  await flushOpsStandalone();
+  const btn = document.getElementById('genBtn');
+  btn.disabled = true;
+  setSaveState('Generating realistic furniture… (1-3 min)');
+  try {
+    const resp = await apiFetch(`/scenes/${standaloneSceneId}/enhance`, { method: 'POST' });
+    serverVersion = resp.version;
+    window.RAI.refreshScene(resp.data);
+    setSaveState('Realistic models applied ✓');
+  } catch (e) {
+    const msg = String(e.message || e);
+    setSaveState(msg.includes('FAL_API_KEY') || msg.includes('not configured')
+      ? 'Set FAL_API_KEY on the server to enable this'
+      : 'Generation failed — try again');
+    console.error(e);
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => setSaveState(''), 6000);
+  }
+}
+
 async function standaloneInit() {
   document.getElementById('topbar').style.display = 'flex';
   document.getElementById('undoBtn').onclick = standaloneUndo;
   document.getElementById('aiBtn').onclick = standaloneAiEdit;
+  document.getElementById('genBtn').onclick = standaloneEnhance;
   window.addEventListener('beforeunload', flushOpsStandalone);
   try {
     const [scene, cat] = await Promise.all([
@@ -274,8 +299,92 @@ function mat(color, opts = {}) {
 }
 
 // ---------------- Room shell ----------------
+function makeFloorTexture(kind, colorHex) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+  const base = new THREE.Color(colorHex);
+  ctx.fillStyle = `#${base.getHexString()}`;
+  ctx.fillRect(0, 0, 512, 512);
+  if (kind === 'wood') {
+    const plankW = 512 / 8;
+    for (let i = 0; i < 8; i++) {
+      const col = base.clone().multiplyScalar(0.82 + ((i * 37) % 12) / 40);
+      ctx.fillStyle = `#${col.getHexString()}`;
+      ctx.fillRect(i * plankW + 1, 0, plankW - 2, 512);
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.fillRect(i * plankW, 0, 1, 512);
+      ctx.fillRect(i * plankW, (i * 197) % 512, plankW, 2); // board seam
+    }
+  } else { // tile
+    ctx.strokeStyle = 'rgba(0,0,0,0.16)';
+    ctx.lineWidth = 2;
+    for (let p = 0; p <= 512; p += 128) {
+      ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, 512); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(512, p); ctx.stroke();
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function floorKind(materialDef) {
+  const t = (materialDef.texture || '').toLowerCase();
+  if (/wood|plank|parquet|laminate|hardwood/.test(t)) return 'wood';
+  if (/tile|ceramic|marble|stone/.test(t)) return 'tile';
+  return null;
+}
+
+function buildFeature(f, room) {
+  const g = new THREE.Group();
+  const wallThick = 0.05;
+  if (f.type === 'window') {
+    const frame = box(f.width_m, f.height_m, wallThick, '#F2F2EE');
+    const pane = box(f.width_m * 0.92, f.height_m * 0.88, 0.02, f.color);
+    pane.material.roughness = 0.2;
+    pane.material.emissive = new THREE.Color(f.color).multiplyScalar(0.55);
+    pane.position.z = 0.02;
+    const barV = box(0.03, f.height_m * 0.88, 0.03, '#F2F2EE'); barV.position.z = 0.035;
+    const barH = box(f.width_m * 0.92, 0.03, 0.03, '#F2F2EE'); barH.position.z = 0.035;
+    g.add(frame, pane, barV, barH);
+  } else if (f.type === 'door') {
+    const slab = box(f.width_m, f.height_m, wallThick, f.color);
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.03, 12, 10), mat('#B8A97C', { metalness: 0.7, roughness: 0.3 }));
+    knob.position.set(f.width_m * 0.38, 0, 0.045);
+    g.add(slab, knob);
+  } else { // curtain: vertical slats faking folds
+    const n = Math.max(4, Math.round(f.width_m * 5));
+    const slatW = f.width_m / n;
+    for (let i = 0; i < n; i++) {
+      const slat = box(slatW * 0.96, f.height_m, 0.03, i % 2 ? f.color : shade(f.color, 0.86));
+      slat.position.set(-f.width_m / 2 + slatW * (i + 0.5), 0, (i % 2) * 0.03);
+      g.add(slat);
+    }
+  }
+
+  const y = f.bottom_m + f.height_m / 2;
+  const inset = 0.04;
+  const w = room.width_m, d = room.depth_m;
+  if (f.wall === 'back') {
+    g.position.set(f.center_x_m, y, -d / 2 + inset);
+  } else if (f.wall === 'front') {
+    g.position.set(f.center_x_m, y, d / 2 - inset);
+    g.rotation.y = Math.PI;
+  } else if (f.wall === 'left') {
+    g.position.set(-w / 2 + inset, y, f.center_x_m);
+    g.rotation.y = Math.PI / 2;
+  } else { // right
+    g.position.set(w / 2 - inset, y, f.center_x_m);
+    g.rotation.y = -Math.PI / 2;
+  }
+  g.userData = { featureId: f.id, featureType: f.type };
+  return g;
+}
+
 function buildRoom() {
-  ['walls', 'floor', 'ceiling'].forEach(k => {
+  ['walls', 'floor', 'ceiling', 'grid', 'features'].forEach(k => {
     if (roomMeshes[k]) { scene3.remove(roomMeshes[k]); roomMeshes[k] = null; }
   });
   const r = sceneData.room;
@@ -294,17 +403,30 @@ function buildRoom() {
   scene3.add(walls);
   roomMeshes.walls = walls;
 
-  const floorGeo = new THREE.PlaneGeometry(w, d);
-  const floor = new THREE.Mesh(floorGeo, mat(r.floor_material.color, { roughness: 0.9 }));
+  const kind = floorKind(r.floor_material);
+  const floorMat = mat(kind ? '#FFFFFF' : r.floor_material.color, { roughness: 0.9 });
+  if (kind) {
+    const tex = makeFloorTexture(kind, r.floor_material.color);
+    tex.repeat.set(Math.max(1, w / 2.2), Math.max(1, d / 2.2));
+    floorMat.map = tex;
+  }
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.name = 'floor';
   scene3.add(floor);
   roomMeshes.floor = floor;
 
+  // Windows / doors / curtains
+  const features = new THREE.Group();
+  (r.features || []).forEach(f => features.add(buildFeature(f, r)));
+  scene3.add(features);
+  roomMeshes.features = features;
+
   const grid = new THREE.GridHelper(Math.max(w, d), Math.round(Math.max(w, d) * 2), 0x000000, 0x000000);
   grid.material.transparent = true; grid.material.opacity = 0.07;
   grid.position.y = 0.002;
   scene3.add(grid);
+  roomMeshes.grid = grid;
 
   controls.target.set(0, Math.min(1.0, h / 2.5), 0);
 }
@@ -492,15 +614,30 @@ function buildObject(obj) {
   let group;
   if (obj.asset?.type === 'url') {
     group = new THREE.Group();
-    gltfLoader.load(obj.asset.ref, (gltf) => {
+    const src = obj.asset.ref.startsWith('http')
+      ? obj.asset.ref
+      : location.origin + obj.asset.ref;
+    // Placeholder box while the generated mesh loads
+    const placeholder = box(dims[0], dims[1], dims[2], color);
+    placeholder.material.transparent = true; placeholder.material.opacity = 0.25;
+    placeholder.position.y = dims[1] / 2;
+    group.add(placeholder);
+    gltfLoader.load(src, (gltf) => {
       const model = gltf.scene;
       const bb = new THREE.Box3().setFromObject(model);
       const size = bb.getSize(new THREE.Vector3());
       const s = Math.min(dims[0] / size.x, dims[1] / size.y, dims[2] / size.z);
       model.scale.setScalar(s);
       const bb2 = new THREE.Box3().setFromObject(model);
+      const center = bb2.getCenter(new THREE.Vector3());
+      model.position.x -= center.x;
+      model.position.z -= center.z;
       model.position.y -= bb2.min.y;
+      group.remove(placeholder);
       group.add(model);
+    }, undefined, (err) => {
+      console.error('GLB load failed, keeping placeholder:', err);
+      placeholder.material.opacity = 1.0;
     });
   } else {
     const builderName = entry?.builder || 'generic';
@@ -562,6 +699,14 @@ function select(sel) {
     document.getElementById('obj-color').value = obj.material_override?.color || entry?.default_color || '#9a9a9a';
     objPanel.classList.add('visible');
     setStatus('Drag the item to move it');
+  } else if (sel.type === 'feature') {
+    const f = (sceneData.room.features || []).find(x => x.id === sel.id);
+    if (!f) return;
+    document.getElementById('shell-title').textContent =
+      f.type.charAt(0).toUpperCase() + f.type.slice(1);
+    document.getElementById('shell-color').value = f.color;
+    shellPanel.classList.add('visible');
+    setStatus(`Editing ${f.type} color`);
   } else {
     document.getElementById('shell-title').textContent = sel.type === 'floor' ? 'Floor' : 'Walls';
     const m = sel.type === 'floor' ? sceneData.room.floor_material : sceneData.room.wall_material;
@@ -657,10 +802,17 @@ function onPointerUp(e) {
   const hit = pickObject(e);
   if (hit) { select({ type: 'object', id: hit.id }); return; }
 
-  // Shell pick: floor or walls
+  // Shell pick: features (windows/doors/curtains) first, then floor/walls
   raycaster.setFromCamera(ndc(e), camera);
-  const shellHits = raycaster.intersectObjects([roomMeshes.floor, roomMeshes.walls].filter(Boolean), false);
+  const shellTargets = [roomMeshes.features, roomMeshes.floor, roomMeshes.walls].filter(Boolean);
+  const shellHits = raycaster.intersectObjects(shellTargets, true);
   if (shellHits.length) {
+    let node = shellHits[0].object;
+    while (node && !node.userData?.featureId) node = node.parent;
+    if (node?.userData?.featureId) {
+      select({ type: 'feature', id: node.userData.featureId });
+      return;
+    }
     select({ type: shellHits[0].object.name === 'floor' ? 'floor' : 'wall' });
     return;
   }
@@ -710,6 +862,14 @@ document.getElementById('obj-color').addEventListener('change', (e) => {
 
 document.getElementById('shell-color').addEventListener('change', (e) => {
   if (!selected || selected.type === 'object') return;
+  if (selected.type === 'feature') {
+    const f = (sceneData.room.features || []).find(x => x.id === selected.id);
+    if (!f) return;
+    f.color = e.target.value;
+    buildRoom();
+    emitOp({ op: 'recolor', target: f.id, value: { color: e.target.value } });
+    return;
+  }
   const key = selected.type === 'floor' ? 'floor_material' : 'wall_material';
   sceneData.room[key].color = e.target.value;
   buildRoom();

@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3-pro-image-preview"  # Supports image generation
     # Text/vision model used for furniture detection when building 3D scenes
     gemini_analysis_model: str = "gemini-2.5-flash"
+
+    # Image-to-3D generation (per-object realistic meshes via fal.ai)
+    # Set FAL_API_KEY in .env to enable the "Make realistic" feature.
+    fal_api_key: str = ""
+    image_to_3d_model: str = "fal-ai/trellis"
     
     class Config:
         env_file = ".env"

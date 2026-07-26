@@ -111,6 +111,43 @@ class _SceneEditorScreenState extends State<SceneEditorScreen> {
     messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _onEnhance() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Make realistic',
+            style: GoogleFonts.poppins(fontSize: 18)),
+        content: const Text(
+          'Generate realistic 3D models of your furniture from the photo? '
+          'This takes 1–3 minutes.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Generate'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(
+      content: Text('Generating realistic furniture… (1–3 min)'),
+      duration: Duration(minutes: 3),
+    ));
+    final (data, message) = await context.read<SceneProvider>().enhance();
+    messenger.hideCurrentSnackBar();
+    if (data != null) _refreshEditorScene(data);
+    messenger.showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SceneProvider>();
@@ -149,6 +186,13 @@ class _SceneEditorScreenState extends State<SceneEditorScreen> {
             tooltip: 'AI edit',
             icon: const Icon(Icons.auto_awesome),
             onPressed: provider.sceneId != null ? _onAiEdit : null,
+          ),
+          IconButton(
+            tooltip: 'Make realistic',
+            icon: const Icon(Icons.auto_fix_high),
+            onPressed: provider.sceneId != null && !provider.isSaving
+                ? _onEnhance
+                : null,
           ),
         ],
       ),

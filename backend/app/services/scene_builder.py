@@ -27,6 +27,7 @@ from ..models.scene import (
     SceneData,
     SceneObject,
     Transform,
+    WallFeature,
 )
 from .catalog_service import catalog_service
 from .depth_service import depth_service
@@ -54,6 +55,11 @@ Return ONLY valid JSON (no markdown fences) with this exact structure:
       "width_m": 2.0,
       "against_wall": true
     }
+  ],
+  "features": [
+    {"type": "window", "bbox": [x_min, y_min, x_max, y_max], "color": "#FFFFFF", "width_m": 1.5},
+    {"type": "curtain", "bbox": [x_min, y_min, x_max, y_max], "color": "#8A8A8A", "width_m": 1.5},
+    {"type": "door", "bbox": [x_min, y_min, x_max, y_max], "color": "#F0F0F0", "width_m": 0.9}
   ]
 }
 
@@ -75,6 +81,8 @@ Rules:
 - Include every piece of floor furniture you can find (max 15 objects).
 - Ignore small decor (books, cups, frames).
 - colors are hex approximations of the item's dominant color.
+- features: windows, doors, and curtains go in "features" (NOT in objects),
+  with their bboxes and dominant colors. Max 6 features.
 """
 
 
@@ -259,9 +267,65 @@ class SceneBuilder:
             if not moved:
                 break
 
+    def _place_features(
+        self,
+        detected: List[Dict[str, Any]],
+        image_size: Tuple[int, int],
+        room: RoomShell,
+    ) -> List[WallFeature]:
+        """Map detected windows/doors/curtains onto the room walls."""
+        img_w, img_h = image_size
+        defaults = {
+            "window": {"bottom_m": 0.8, "height_m": 1.3, "color": "#EAF2F8"},
+            "door": {"bottom_m": 0.0, "height_m": 2.0, "color": "#EFEBE2"},
+            "curtain": {"bottom_m": 0.05, "height_m": room.height_m - 0.2, "color": "#B9B2A6"},
+        }
+        features: List[WallFeature] = []
+        for det in detected[:6]:
+            ftype = (det.get("type") or "").strip().lower()
+            if ftype not in defaults:
+                continue
+            bbox = det.get("bbox") or [0, 0, img_w, img_h]
+            try:
+                x0, y0, x1, y1 = [float(v) for v in bbox]
+            except (TypeError, ValueError):
+                continue
+            cx_norm = ((x0 + x1) / 2.0) / img_w
+
+            # Which wall? Extreme left/right of the frame -> side walls,
+            # otherwise the back wall (the one facing the camera).
+            if cx_norm < 0.15:
+                wall, wall_len = "left", room.depth_m
+                center_x = 0.0
+            elif cx_norm > 0.85:
+                wall, wall_len = "right", room.depth_m
+                center_x = 0.0
+            else:
+                wall, wall_len = "back", room.width_m
+                center_x = (cx_norm - 0.5) * room.width_m
+
+            d = defaults[ftype]
+            width = float(det.get("width_m") or ((x1 - x0) / img_w) * wall_len)
+            width = self._clamp(width, 0.4, wall_len - 0.2)
+            height = self._clamp(float(det.get("height_m") or d["height_m"]), 0.4, room.height_m - 0.1)
+            bottom = self._clamp(float(det.get("bottom_m") or d["bottom_m"]), 0.0, room.height_m - height)
+            center_x = self._clamp(center_x, -wall_len / 2 + width / 2, wall_len / 2 - width / 2)
+
+            features.append(WallFeature(
+                id=f"{ftype}_{uuid.uuid4().hex[:6]}",
+                type=ftype,
+                wall=wall,
+                center_x_m=round(center_x, 3),
+                width_m=round(width, 3),
+                height_m=round(height, 3),
+                bottom_m=round(bottom, 3),
+                color=det.get("color") or d["color"],
+            ))
+        return features
+
     # ---------- main entry ----------
 
-    async def build_scene_from_image(self, image_base64: str) -> SceneData:
+    async def build_scene_from_image(self, image_base64: str):
         # Depth map (best-effort; placement degrades gracefully without it).
         # Detection runs on the SAME resized image so bboxes and depth line up.
         depth_map = None
@@ -291,18 +355,25 @@ class SceneBuilder:
             ),
         )
 
+        room.features = self._place_features(
+            detection.get("features") or [], image_size, room
+        )
+
         # NOTE: detection bboxes are relative to the image we described in the prompt;
         # depth map is the same size, so coordinates line up.
         objects = self._place_objects(
             detection.get("objects") or [], depth_map, image_size, room
         )
 
-        return SceneData(
+        data = SceneData(
             room_type=detection.get("room_type") or "room",
             style=detection.get("style"),
             room=room,
             objects=objects,
         )
+        # Return the resized photo too so the caller can persist it
+        # (needed later to crop per-object images for 3D generation).
+        return data, resized_image
 
 
 scene_builder = SceneBuilder()

@@ -145,6 +145,26 @@ class SceneProvider extends ChangeNotifier {
     }
   }
 
+  /// Replace stand-in furniture with AI-generated meshes from the photo.
+  /// Returns (newSceneData, message).
+  Future<(Map<String, dynamic>?, String)> enhance() async {
+    if (sceneId == null) return (null, 'No scene loaded');
+    await flushOps();
+    _isSaving = true;
+    notifyListeners();
+    try {
+      final previousVersion = version;
+      _scene = await _apiService.enhanceScene(sceneId!);
+      _undoStack.add(previousVersion);
+      return (sceneData, 'Realistic furniture applied');
+    } catch (e) {
+      return (null, e.toString());
+    } finally {
+      _isSaving = false;
+      notifyListeners();
+    }
+  }
+
   void clear() {
     _saveTimer?.cancel();
     _scene = null;

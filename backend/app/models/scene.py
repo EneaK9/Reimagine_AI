@@ -21,6 +21,23 @@ class MaterialDef(BaseModel):
     metalness: float = 0.0
 
 
+class WallFeature(BaseModel):
+    """
+    Something on a wall: window, door, or curtain.
+    Rendered as part of the shell (recolorable, not movable like furniture).
+    wall: back (the wall facing the camera in the photo) | left | right | front.
+    center_x_m: offset along the wall from its center, in meters.
+    """
+    id: str
+    type: str  # window | door | curtain
+    wall: str = "back"
+    center_x_m: float = 0.0
+    width_m: float = 1.2
+    height_m: float = 1.4
+    bottom_m: float = 0.8
+    color: str = "#FFFFFF"
+
+
 class RoomShell(BaseModel):
     """Parametric room box: floor + walls + ceiling with editable materials."""
     width_m: float = 4.0   # along X
@@ -29,6 +46,7 @@ class RoomShell(BaseModel):
     wall_material: MaterialDef = Field(default_factory=lambda: MaterialDef(color="#F2EDE4"))
     floor_material: MaterialDef = Field(default_factory=lambda: MaterialDef(color="#A98B6D"))
     ceiling_material: MaterialDef = Field(default_factory=lambda: MaterialDef(color="#FFFFFF"))
+    features: List[WallFeature] = Field(default_factory=list)
 
 
 class Transform(BaseModel):

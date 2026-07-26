@@ -47,6 +47,7 @@ class ApiConfig {
   static String sceneVersions(String id) => '$apiVersion/scenes/$id/versions';
   static String sceneRevert(String id, int version) =>
       '$apiVersion/scenes/$id/revert/$version';
+  static String sceneEnhance(String id) => '$apiVersion/scenes/$id/enhance';
 
   // Timeouts
   static const Duration connectTimeout = Duration(seconds: 15);

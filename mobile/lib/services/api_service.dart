@@ -444,6 +444,22 @@ class ApiService {
     }
   }
 
+  /// Generate realistic 3D meshes for the scene's furniture (image-to-3D)
+  Future<Map<String, dynamic>> enhanceScene(String sceneId) async {
+    try {
+      final response = await _dio.post(
+        ApiConfig.sceneEnhance(sceneId),
+        options: Options(
+          sendTimeout: ApiConfig.longReceiveTimeout,
+          receiveTimeout: ApiConfig.longReceiveTimeout, // generation takes minutes
+        ),
+      );
+      return response.data;
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
   /// Revert a scene to a previous version
   Future<Map<String, dynamic>> revertScene(String sceneId, int version) async {
     try {
