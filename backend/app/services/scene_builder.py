@@ -98,6 +98,9 @@ def _strip_json(text: str) -> str:
 
 
 class SceneBuilder:
+    def __init__(self):
+        self._working_gemini_model: str | None = None
+
     async def detect_room(self, image_base64: str, image_size: Tuple[int, int]) -> Dict[str, Any]:
         """Run furniture/room detection; Gemini first, OpenAI vision fallback."""
         width, height = image_size
@@ -105,22 +108,44 @@ class SceneBuilder:
 
         # --- Gemini (primary) ---
         if gemini_service.client:
-            try:
-                import base64 as b64
-                from google.genai import types
+            import base64 as b64
+            from google.genai import types
 
-                image_bytes = b64.b64decode(
-                    image_base64.split(",")[1] if image_base64.startswith("data:") else image_base64
-                )
-                image_part = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
-                response = gemini_service.client.models.generate_content(
-                    model=settings.gemini_analysis_model,
-                    contents=[prompt, image_part],
-                    config=types.GenerateContentConfig(response_mime_type="application/json"),
-                )
-                return json.loads(_strip_json(response.text))
-            except Exception as e:
-                print(f"[SceneBuilder] Gemini detection failed, trying OpenAI: {e}")
+            image_bytes = b64.b64decode(
+                image_base64.split(",")[1] if image_base64.startswith("data:") else image_base64
+            )
+            image_part = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+
+            # Model names get retired; try a cascade and remember what works
+            candidates = list(dict.fromkeys([
+                self._working_gemini_model or settings.gemini_analysis_model,
+                settings.gemini_analysis_model,
+                "gemini-flash-latest",
+                "gemini-3-flash-preview",
+                "gemini-2.5-flash",
+                "gemini-2.0-flash",
+            ]))
+            for model in candidates:
+                if not model:
+                    continue
+                try:
+                    response = gemini_service.client.models.generate_content(
+                        model=model,
+                        contents=[prompt, image_part],
+                        config=types.GenerateContentConfig(response_mime_type="application/json"),
+                    )
+                    result = json.loads(_strip_json(response.text))
+                    if self._working_gemini_model != model:
+                        print(f"[SceneBuilder] Using Gemini model: {model}")
+                        self._working_gemini_model = model
+                    return result
+                except Exception as e:
+                    err = str(e)
+                    if "NOT_FOUND" in err or "not found" in err or "404" in err:
+                        print(f"[SceneBuilder] Gemini model {model} unavailable, trying next")
+                        continue
+                    print(f"[SceneBuilder] Gemini detection failed, trying OpenAI: {e}")
+                    break
 
         # --- OpenAI vision (fallback) ---
         try:

@@ -227,7 +227,8 @@ async def enhance_scene(
     if not candidates:
         raise HTTPException(status_code=400, detail="No photo-detected objects to enhance.")
 
-    semaphore = asyncio.Semaphore(3)
+    # 2 concurrent generations: higher parallelism trips fal.ai rate limits (403)
+    semaphore = asyncio.Semaphore(2)
 
     async def generate(obj):
         x0, y0, x1, y1 = obj.source["bbox"]

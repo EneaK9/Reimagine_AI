@@ -17,6 +17,7 @@ open3d>=0.17.0  # 3D mesh generation and processing
 numpy>=1.24.0
 scipy>=1.10.0
 transformers>=4.40.0  # Depth Anything V2 for scene building (optional at runtime)
+rembg>=2.0.50  # Background removal for image-to-3D furniture generation
 
 # Database
 sqlalchemy>=2.0.25

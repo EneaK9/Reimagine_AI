@@ -61,6 +61,50 @@ class GenerationService:
 
     # ---------- image -> GLB ----------
 
+    def _remove_background(self, image: Image.Image, label: str) -> Image.Image:
+        """
+        Cut the furniture out of its crop. Without this, the image-to-3D
+        model reconstructs the room background as part of the mesh
+        (result: object embedded in a dark slab).
+        """
+        try:
+            from rembg import remove
+
+            import numpy as np
+
+            cut = remove(image.convert("RGB"))
+            # Sanity check: if almost nothing survived, the segmentation
+            # failed — better to send the original crop.
+            alpha = np.asarray(cut.getchannel("A"))
+            coverage = float((alpha > 30).mean())
+            if coverage < 0.05:
+                print(f"[Gen3D] Background removal left too little for '{label}'; using raw crop")
+                return image
+            return cut
+        except ImportError:
+            print("[Gen3D] rembg not installed — sending raw crop (pip install rembg)")
+            return image
+        except Exception as e:
+            print(f"[Gen3D] Background removal failed for '{label}': {e}")
+            return image
+
+    MIN_CROP_PX = 40       # below this the crop carries no usable detail
+    TARGET_CROP_PX = 512   # upscale small crops so segmentation + 3D work well
+
+    def _prepare_crop(self, image: Image.Image, label: str) -> Optional[Image.Image]:
+        """Reject hopeless crops; upscale small ones before segmentation."""
+        if min(image.width, image.height) < self.MIN_CROP_PX:
+            print(f"[Gen3D] Crop for '{label}' too small "
+                  f"({image.width}x{image.height}) — keeping procedural model")
+            return None
+        if min(image.width, image.height) < self.TARGET_CROP_PX:
+            scale = self.TARGET_CROP_PX / min(image.width, image.height)
+            image = image.resize(
+                (int(image.width * scale), int(image.height * scale)),
+                Image.Resampling.LANCZOS,
+            )
+        return image
+
     async def image_to_glb(self, image: Image.Image, label: str = "") -> Optional[str]:
         """
         Generate a textured GLB from a furniture crop.
@@ -69,18 +113,44 @@ class GenerationService:
         if not self.enabled:
             return None
 
+        import asyncio
+
+        prepared = self._prepare_crop(image, label)
+        if prepared is None:
+            return None
+
+        # Background removal is CPU-bound; keep it off the event loop
+        cut = await asyncio.to_thread(self._remove_background, prepared, label)
+
         buf = BytesIO()
-        image.convert("RGB").save(buf, "JPEG", quality=92)
-        data_uri = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+        if cut.mode == "RGBA":
+            cut.save(buf, "PNG")
+            data_uri = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+        else:
+            cut.convert("RGB").save(buf, "JPEG", quality=92)
+            data_uri = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
         try:
             async with httpx.AsyncClient(timeout=GENERATION_TIMEOUT_S) as client:
-                response = await client.post(
-                    f"https://fal.run/{settings.image_to_3d_model}",
-                    headers={"Authorization": f"Key {settings.fal_api_key}"},
-                    json={"image_url": data_uri},
-                )
-                response.raise_for_status()
+                response = None
+                for attempt in range(3):
+                    response = await client.post(
+                        f"https://fal.run/{settings.image_to_3d_model}",
+                        headers={"Authorization": f"Key {settings.fal_api_key}"},
+                        json={"image_url": data_uri},
+                    )
+                    if response.status_code in (403, 429) and attempt < 2:
+                        # Concurrency/rate limit — back off and retry
+                        wait = 10 * (attempt + 1)
+                        print(f"[Gen3D] fal returned {response.status_code} for "
+                              f"'{label}' ({response.text[:150]}); retrying in {wait}s")
+                        await asyncio.sleep(wait)
+                        continue
+                    break
+                if response.status_code >= 400:
+                    print(f"[Gen3D] fal error {response.status_code} for '{label}': "
+                          f"{response.text[:300]}")
+                    return None
                 result = response.json()
 
                 # fal model outputs vary slightly; check the common keys
