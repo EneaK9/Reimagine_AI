@@ -181,6 +181,22 @@ async def _handle_chat(
             mesh_id = existing_mesh_id
             mesh_url = f"/api/v1/depth/mesh/{mesh_id}"
 
+    # If this conversation has an editable 3D scene, mirror the edit onto it
+    scene_id = conversation_service.get_scene_id(db, conversation.id, user_id=user_id)
+    scene_updated = False
+    if scene_id and _is_edit_request(request.message) and not _is_affirmative(request.message):
+        try:
+            from ..services.scene_service import scene_service
+
+            _, applied_ops, scene_message = await scene_service.nl_edit(
+                db, scene_id, request.message, user_id=user_id
+            )
+            if applied_ops:
+                scene_updated = True
+                ai_response = f"{ai_response}\n\n🛋️ {scene_message}"
+        except Exception as scene_error:
+            print(f"[Chat] Scene edit failed: {scene_error}")
+
     clean_response = ai_response
     if "[IMAGE_PROMPT]" in clean_response:
         clean_response = clean_response.split("[IMAGE_PROMPT]")[0].strip()
@@ -192,6 +208,8 @@ async def _handle_chat(
         furniture_suggestions=[],
         mesh_url=mesh_url,
         mesh_id=mesh_id,
+        scene_id=scene_id,
+        scene_updated=scene_updated,
     )
 
 

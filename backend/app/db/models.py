@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -42,6 +43,7 @@ class Conversation(Base):
     original_image: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     last_generated_image: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     mesh_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    scene_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True
@@ -72,3 +74,49 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
+
+
+class Scene(Base):
+    """Editable structured 3D scene: room shell + one entry per furniture object."""
+
+    __tablename__ = "scenes"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    conversation_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), default="My Room")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    data: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True
+    )
+
+    versions: Mapped[List["SceneVersion"]] = relationship(
+        back_populates="scene",
+        cascade="all, delete-orphan",
+        order_by="SceneVersion.version",
+    )
+
+
+class SceneVersion(Base):
+    """Snapshot of a scene at a past version (for undo/history)."""
+
+    __tablename__ = "scene_versions"
+    __table_args__ = (
+        Index("ix_scene_versions_scene_version", "scene_id", "version"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scene_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("scenes.id", ondelete="CASCADE"), index=True
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    data: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    scene: Mapped["Scene"] = relationship(back_populates="versions")

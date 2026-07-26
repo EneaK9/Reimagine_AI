@@ -43,6 +43,8 @@ class DepthService:
         self.transform = None
         self.device = None
         self._initialized = False
+        self._da2_pipe = None  # Depth Anything V2 (optional upgrade)
+        self._da2_failed = False
         
         # Storage paths
         self.data_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'data')
@@ -147,6 +149,64 @@ class DepthService:
         
         return depth_map, original_image
     
+    def generate_depth_map_v2(self, image_base64: str, max_size: int = 768) -> Tuple[np.ndarray, Image.Image]:
+        """
+        Preferred depth path: Depth Anything V2 (sharper, more robust indoors).
+        Falls back to MiDaS when transformers/the model isn't available.
+
+        Returns (closeness_map, resized_image) with the same convention as
+        generate_depth_map: values normalized 0-1, higher = closer to camera.
+        """
+        if not self._da2_failed:
+            try:
+                return self._depth_anything_map(image_base64, max_size)
+            except Exception as e:
+                self._da2_failed = True
+                print(f"[Depth] Depth Anything V2 unavailable ({e}); falling back to MiDaS")
+        return self.generate_depth_map(image_base64, max_size)
+
+    def _depth_anything_map(self, image_base64: str, max_size: int = 768) -> Tuple[np.ndarray, Image.Image]:
+        if not _torch_available:
+            raise RuntimeError("PyTorch is not installed")
+
+        if self._da2_pipe is None:
+            from transformers import pipeline as hf_pipeline
+
+            device = 0 if torch.cuda.is_available() else -1
+            print("[Depth] Loading Depth Anything V2 (small)...")
+            self._da2_pipe = hf_pipeline(
+                "depth-estimation",
+                model="depth-anything/Depth-Anything-V2-Small-hf",
+                device=device,
+            )
+            print("[Depth] Depth Anything V2 loaded")
+
+        image = self._decode_base64_image(image_base64)
+        width, height = image.size
+        if max(width, height) > max_size:
+            scale = max_size / max(width, height)
+            image = image.resize(
+                (int(width * scale), int(height * scale)), Image.Resampling.LANCZOS
+            )
+
+        result = self._da2_pipe(image)
+        depth = result["predicted_depth"]
+        if hasattr(depth, "numpy"):
+            depth = depth.squeeze().float().cpu().numpy()
+        depth = np.asarray(depth, dtype=np.float32)
+
+        # Resize prediction to match the image exactly
+        if depth.shape != (image.height, image.width):
+            depth_img = Image.fromarray(depth)
+            depth_img = depth_img.resize((image.width, image.height), Image.Resampling.BICUBIC)
+            depth = np.asarray(depth_img, dtype=np.float32)
+
+        # DA-V2 relative depth is disparity-like: higher = closer (same as MiDaS)
+        dmin, dmax = float(depth.min()), float(depth.max())
+        if dmax - dmin > 0:
+            depth = (depth - dmin) / (dmax - dmin)
+        return depth, image
+
     def depth_map_to_image(self, depth_map: np.ndarray) -> str:
         """Convert depth map to a viewable grayscale image (base64)."""
         # Convert to 8-bit grayscale

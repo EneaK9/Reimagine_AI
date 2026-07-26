@@ -36,6 +36,18 @@ class ApiConfig {
   static String depthMeshInfo(String meshId) => '$apiVersion/depth/mesh/$meshId/info';
   static const String depthUpdateMesh = '$apiVersion/depth/update-mesh';
   
+  // Editable 3D Scene Endpoints (structured room + furniture objects)
+  static const String scenes = '$apiVersion/scenes';
+  static const String sceneCatalog = '$apiVersion/scenes/catalog';
+  static const String sceneGenerate = '$apiVersion/scenes/generate';
+  static const String sceneGenerateUpload = '$apiVersion/scenes/generate/upload';
+  static String sceneById(String id) => '$apiVersion/scenes/$id';
+  static String sceneOps(String id) => '$apiVersion/scenes/$id/ops';
+  static String sceneNlEdit(String id) => '$apiVersion/scenes/$id/nl-edit';
+  static String sceneVersions(String id) => '$apiVersion/scenes/$id/versions';
+  static String sceneRevert(String id, int version) =>
+      '$apiVersion/scenes/$id/revert/$version';
+
   // Timeouts
   static const Duration connectTimeout = Duration(seconds: 15);
   static const Duration receiveTimeout = Duration(seconds: 120); // Normal operations

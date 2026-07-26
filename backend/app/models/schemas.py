@@ -61,6 +61,8 @@ class ChatResponse(BaseModel):
     furniture_suggestions: List[dict] = []
     mesh_url: Optional[str] = None  # URL to updated 3D mesh (if conversation has mesh)
     mesh_id: Optional[str] = None  # ID of mesh for future edits
+    scene_id: Optional[str] = None  # ID of the editable 3D scene (if any)
+    scene_updated: bool = False  # True when this message changed the 3D scene
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -107,6 +109,8 @@ class Conversation(BaseModel):
     last_generated_image: Optional[str] = None  # Base64 of last generated image for edits
     # For 3D mesh generation
     mesh_id: Optional[str] = None  # ID of associated 3D mesh
+    # For the editable structured 3D scene
+    scene_id: Optional[str] = None
     
     
 class ConversationSummary(BaseModel):

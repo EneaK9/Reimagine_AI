@@ -11,6 +11,7 @@ import '../widgets/conversation_sidebar.dart';
 import '../widgets/landing/decorations.dart';
 import '../theme/app_theme.dart';
 import 'room_scan_screen.dart';
+import 'scene_editor_screen.dart';
 
 /// Design studio — mobile uses a compact drawer layout; web uses a
 /// desktop shell with a persistent sidebar and a distinct home canvas.
@@ -141,12 +142,31 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
           ),
+          if (context.watch<ChatProvider>().hasScene) ...[
+            _IconBtn(
+              icon: Icons.chair_rounded,
+              tooltip: 'Open 3D room',
+              onTap: _openSceneEditor,
+            ),
+            const SizedBox(width: 8),
+          ],
           _IconBtn(
             icon: Icons.add_rounded,
             tooltip: 'New design',
             onTap: () => context.read<ChatProvider>().startNewConversation(),
           ),
         ],
+      ),
+    );
+  }
+
+  void _openSceneEditor() {
+    final sceneId = context.read<ChatProvider>().currentSceneId;
+    if (sceneId == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SceneEditorScreen(sceneId: sceneId),
       ),
     );
   }

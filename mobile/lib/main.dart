@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/auth_provider.dart';
+import 'providers/scene_provider.dart';
 import 'screens/landing_screen.dart';
 import 'screens/login_screen.dart';
 import 'theme/app_theme.dart';
@@ -33,6 +34,7 @@ class ReimagineAIApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => ChatProvider()),
+        ChangeNotifierProvider(create: (_) => SceneProvider()),
       ],
       child: MaterialApp(
         title: 'ReimagineAI',

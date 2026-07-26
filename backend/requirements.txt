@@ -16,6 +16,7 @@ opencv-python>=4.8.0  # Required for MiDaS transforms
 open3d>=0.17.0  # 3D mesh generation and processing
 numpy>=1.24.0
 scipy>=1.10.0
+transformers>=4.40.0  # Depth Anything V2 for scene building (optional at runtime)
 
 # Database
 sqlalchemy>=2.0.25

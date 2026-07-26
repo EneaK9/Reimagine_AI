@@ -37,6 +37,7 @@ class ConversationService:
             original_image=row.original_image,
             last_generated_image=row.last_generated_image,
             mesh_id=row.mesh_id,
+            scene_id=row.scene_id,
         )
 
     def _get_row(
@@ -250,6 +251,29 @@ class ConversationService:
         self, db: Session, conversation_id: str, user_id: Optional[str] = None
     ) -> bool:
         return self.get_mesh_id(db, conversation_id, user_id) is not None
+
+    def store_scene_reference(
+        self,
+        db: Session,
+        conversation_id: str,
+        scene_id: str,
+        user_id: Optional[str] = None,
+    ) -> None:
+        row = self._get_row(db, conversation_id, user_id, with_messages=False)
+        if row:
+            row.scene_id = scene_id
+            row.updated_at = datetime.utcnow()
+            db.commit()
+            print(
+                f"[ConversationService] Stored scene {scene_id} "
+                f"for conversation {conversation_id}"
+            )
+
+    def get_scene_id(
+        self, db: Session, conversation_id: str, user_id: Optional[str] = None
+    ) -> Optional[str]:
+        row = self._get_row(db, conversation_id, user_id, with_messages=False)
+        return row.scene_id if row else None
 
 
 conversation_service = ConversationService()

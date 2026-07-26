@@ -351,6 +351,109 @@ class ApiService {
     }
   }
 
+  // ============ Editable 3D Scene Methods ============
+
+  /// Build an editable 3D scene (room shell + furniture objects) from a photo
+  Future<Map<String, dynamic>> generateSceneFromPhoto(
+    File imageFile, {
+    String? conversationId,
+    String? title,
+  }) async {
+    try {
+      final formData = FormData.fromMap({
+        'image': await _imageMultipart(imageFile),
+        if (conversationId != null) 'conversation_id': conversationId,
+        if (title != null) 'title': title,
+      });
+
+      final response = await _dio.post(
+        ApiConfig.sceneGenerateUpload,
+        data: formData,
+        options: Options(
+          headers: {'Content-Type': 'multipart/form-data'},
+          sendTimeout: ApiConfig.longReceiveTimeout,
+          receiveTimeout: ApiConfig.longReceiveTimeout,
+        ),
+      );
+      return response.data;
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Get a scene by ID
+  Future<Map<String, dynamic>> getScene(String sceneId) async {
+    try {
+      final response = await _dio.get(ApiConfig.sceneById(sceneId));
+      return response.data;
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Get the furniture catalog used by the 3D editor
+  Future<Map<String, dynamic>> getSceneCatalog() async {
+    try {
+      final response = await _dio.get(ApiConfig.sceneCatalog);
+      return response.data;
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Apply edit operations (move/rotate/recolor/swap/add/remove)
+  Future<Map<String, dynamic>> applySceneOps(
+    String sceneId,
+    List<Map<String, dynamic>> ops,
+  ) async {
+    try {
+      final response = await _dio.post(
+        ApiConfig.sceneOps(sceneId),
+        data: {'ops': ops},
+      );
+      return response.data;
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Apply a plain-English edit to the scene ("move the sofa to the corner")
+  Future<Map<String, dynamic>> sceneNlEdit(
+    String sceneId,
+    String instruction,
+  ) async {
+    try {
+      final response = await _dio.post(
+        ApiConfig.sceneNlEdit(sceneId),
+        data: {'instruction': instruction},
+        options: Options(receiveTimeout: ApiConfig.longReceiveTimeout),
+      );
+      return response.data;
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// List scene versions (for undo/history)
+  Future<List<Map<String, dynamic>>> listSceneVersions(String sceneId) async {
+    try {
+      final response = await _dio.get(ApiConfig.sceneVersions(sceneId));
+      return List<Map<String, dynamic>>.from(response.data['versions'] ?? []);
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Revert a scene to a previous version
+  Future<Map<String, dynamic>> revertScene(String sceneId, int version) async {
+    try {
+      final response = await _dio.post(ApiConfig.sceneRevert(sceneId, version));
+      return response.data;
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
   /// Handle API errors
   ApiException _handleError(DioException e) {
     switch (e.type) {
@@ -390,6 +493,8 @@ class ChatResponse {
   final List<Map<String, dynamic>> furnitureSuggestions;
   final String? meshUrl;  // URL to updated 3D mesh (if conversation has mesh)
   final String? meshId;   // Mesh ID for further edits
+  final String? sceneId;  // Editable 3D scene attached to the conversation
+  final bool sceneUpdated; // True when this message changed the 3D scene
 
   ChatResponse({
     required this.conversationId,
@@ -398,6 +503,8 @@ class ChatResponse {
     this.furnitureSuggestions = const [],
     this.meshUrl,
     this.meshId,
+    this.sceneId,
+    this.sceneUpdated = false,
   });
 
   factory ChatResponse.fromJson(Map<String, dynamic> json) {
@@ -410,6 +517,8 @@ class ChatResponse {
       ),
       meshUrl: json['mesh_url'],
       meshId: json['mesh_id'],
+      sceneId: json['scene_id'],
+      sceneUpdated: json['scene_updated'] ?? false,
     );
   }
 }

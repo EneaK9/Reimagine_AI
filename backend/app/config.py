@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     # Google Gemini Settings (for room redesign - image editing)
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3-pro-image-preview"  # Supports image generation
+    # Text/vision model used for furniture detection when building 3D scenes
+    gemini_analysis_model: str = "gemini-2.5-flash"
     
     class Config:
         env_file = ".env"

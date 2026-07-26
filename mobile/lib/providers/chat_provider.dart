@@ -15,6 +15,8 @@ class ChatProvider with ChangeNotifier {
   File? _selectedImage;
   String? _currentMeshUrl;  // URL to 3D mesh for this conversation
   String? _currentMeshId;   // Mesh ID for editing the mesh
+  String? _currentSceneId;  // Editable 3D scene attached to this conversation
+  bool _sceneJustUpdated = false; // Last message changed the 3D scene
 
   // Getters
   Conversation? get currentConversation => _currentConversation;
@@ -27,12 +29,23 @@ class ChatProvider with ChangeNotifier {
   String? get currentMeshUrl => _currentMeshUrl;
   String? get currentMeshId => _currentMeshId;
   bool get hasMesh => _currentMeshUrl != null && _currentMeshId != null;
+  String? get currentSceneId => _currentSceneId;
+  bool get hasScene => _currentSceneId != null;
+  bool get sceneJustUpdated => _sceneJustUpdated;
+
+  /// Attach an editable 3D scene to the current conversation
+  void setCurrentScene(String? sceneId) {
+    _currentSceneId = sceneId;
+    notifyListeners();
+  }
 
   /// Start a new conversation
   void startNewConversation() {
     _currentConversation = Conversation.create();
     _currentMeshUrl = null;  // Clear mesh when starting new conversation
     _currentMeshId = null;   // Clear mesh ID too
+    _currentSceneId = null;
+    _sceneJustUpdated = false;
     _error = null;
     notifyListeners();
   }
@@ -139,6 +152,12 @@ class ChatProvider with ChangeNotifier {
       if (response.meshId != null) {
         _currentMeshId = response.meshId;
       }
+
+      // Track the editable 3D scene (edited via chat on the backend)
+      if (response.sceneId != null) {
+        _currentSceneId = response.sceneId;
+      }
+      _sceneJustUpdated = response.sceneUpdated;
 
     } catch (e) {
       // Remove loading message on error

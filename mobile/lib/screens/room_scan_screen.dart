@@ -7,8 +7,10 @@ import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
 import '../providers/chat_provider.dart';
+import '../providers/scene_provider.dart';
 import '../widgets/platform_image.dart';
 import 'chat_screen.dart';
+import 'scene_editor_screen.dart';
 
 /// Quick Scan Screen - Photo to 3D using depth estimation
 /// Replaces the Unity-based AR scanning with a simpler photo-based approach
@@ -29,6 +31,7 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
   String? _meshId;
   String? _depthMapUrl;
   bool _isGenerating = false;
+  bool _isBuildingScene = false;
   String? _error;
   
   // Generation progress
@@ -112,6 +115,44 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
         _error = 'Failed to generate 3D view: $e';
         _progressMessage = '';
       });
+    }
+  }
+
+  /// Build the structured, editable 3D room (separate furniture objects)
+  /// and open the interactive editor.
+  Future<void> _buildEditableRoom() async {
+    if (_capturedImage == null || _isBuildingScene) return;
+
+    setState(() => _isBuildingScene = true);
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('Building your editable 3D room… this can take a minute.'),
+        duration: Duration(seconds: 45),
+      ),
+    );
+
+    try {
+      final sceneResponse =
+          await _apiService.generateSceneFromPhoto(_capturedImage!);
+      if (!mounted) return;
+      messenger.hideCurrentSnackBar();
+
+      final sceneProvider = context.read<SceneProvider>();
+      await sceneProvider.setGeneratedScene(sceneResponse);
+
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const SceneEditorScreen()),
+      );
+    } catch (e) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not build the 3D room: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _isBuildingScene = false);
     }
   }
 
@@ -606,7 +647,38 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
         // Action buttons
         Padding(
           padding: const EdgeInsets.all(16),
-          child: Row(
+          child: Column(
+            children: [
+              // Structured editable room (move/recolor/swap furniture)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _isBuildingScene ? null : _buildEditableRoom,
+                  icon: _isBuildingScene
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.chair_rounded),
+                  label: Text(_isBuildingScene
+                      ? 'Building editable room…'
+                      : 'Create Editable 3D Room'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryColor,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
             children: [
               Expanded(
                 child: OutlinedButton.icon(
@@ -638,6 +710,8 @@ class _RoomScanScreenState extends State<RoomScanScreen> {
                   ),
                 ),
               ),
+            ],
+          ),
             ],
           ),
         ),
