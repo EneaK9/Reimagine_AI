@@ -263,6 +263,8 @@ class SceneService:
                 raise SceneServiceError(f"Unknown shell target {op.target}")
             if "color" in value:
                 material["color"] = value["color"]
+                # Explicit recolor means "flat color" — drop the photo texture
+                material["texture_url"] = None
             if "texture" in value:
                 material["texture"] = value["texture"]
             return

@@ -301,69 +301,6 @@ Make the edit now."""
             traceback.print_exc()
             raise
     
-    async def photoreal_render(
-        self,
-        image_base64: str,
-        room_type: str = "room",
-        max_retries: int = 3,
-    ) -> Optional[str]:
-        """
-        Turn a screenshot of the 3D editor scene into a photorealistic
-        interior render — same structure-preserving img2img approach that
-        tools like Archsynth use on 3D viewport captures.
-        Returns a data URL or None.
-        """
-        if not self.client:
-            print("Gemini API key not set")
-            return None
-
-        prompt = f"""Create a render in hyper-realistic architectural visualization quality.
-
-This image is a simplified 3D preview of a {room_type}. Re-render it as a
-photorealistic interior photograph.
-
-CRITICAL rules:
-1. ALL objects, furniture and architectural features must remain EXACTLY in
-   place. Do not add any objects. Do not delete anything.
-2. The spatial configuration, camera angle and proportions must remain unchanged.
-3. Keep every object's color; enhance materials only: realistic fabric weave,
-   wood grain, soft shadows, gentle reflections, polished clarity.
-4. Use natural daylight from the windows plus warm light from any lamps.
-5. The result should look like a professional interior design photograph of
-   this exact room."""
-
-        try:
-            image_bytes = base64.b64decode(
-                image_base64.split(",")[1] if image_base64.startswith("data:") else image_base64
-            )
-            image_part = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
-
-            for attempt in range(max_retries):
-                try:
-                    response = self.client.models.generate_content(
-                        model=self.model,
-                        contents=[prompt, image_part],
-                        config=types.GenerateContentConfig(
-                            response_modalities=["TEXT", "IMAGE"],
-                        ),
-                    )
-                    for part in response.candidates[0].content.parts:
-                        if part.inline_data is not None:
-                            img_b64 = base64.b64encode(part.inline_data.data).decode("utf-8")
-                            mime = part.inline_data.mime_type or "image/png"
-                            return f"data:{mime};base64,{img_b64}"
-                    return None
-                except Exception as e:
-                    text = str(e)
-                    if ("503" in text or "overloaded" in text.lower()) and attempt < max_retries - 1:
-                        await asyncio.sleep((attempt + 1) * 3)
-                        continue
-                    raise
-        except Exception as e:
-            print(f"Photoreal render error: {e}")
-            return None
-        return None
-
     def get_available_styles(self) -> List[dict]:
         """Get list of available design styles."""
         return [

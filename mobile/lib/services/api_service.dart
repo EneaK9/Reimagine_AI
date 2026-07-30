@@ -460,20 +460,6 @@ class ApiService {
     }
   }
 
-  /// Photorealistic render of the current 3D view (Archsynth-style img2img)
-  Future<String?> renderScene(String sceneId, String screenshotBase64) async {
-    try {
-      final response = await _dio.post(
-        '${ApiConfig.scenes}/$sceneId/render',
-        data: {'image_base64': screenshotBase64},
-        options: Options(receiveTimeout: ApiConfig.longReceiveTimeout),
-      );
-      return response.data['image'] as String?;
-    } on DioException catch (e) {
-      throw _handleError(e);
-    }
-  }
-
   /// Revert a scene to a previous version
   Future<Map<String, dynamic>> revertScene(String sceneId, int version) async {
     try {

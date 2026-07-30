@@ -59,6 +59,14 @@ class GenerationService:
         path = os.path.join(self.generated_dir, safe)
         return path if os.path.exists(path) else None
 
+    def save_texture(self, image: Image.Image, kind: str = "tex") -> str:
+        """Store a texture patch sampled from the photo; returns its URL path."""
+        filename = f"{kind}_{uuid.uuid4().hex[:10]}.jpg"
+        image.convert("RGB").save(
+            os.path.join(self.generated_dir, filename), "JPEG", quality=88
+        )
+        return f"/api/v1/scenes/assets/{filename}"
+
     # ---------- image -> GLB ----------
 
     _rembg_sessions: dict = {}

@@ -46,6 +46,8 @@ Return ONLY valid JSON (no markdown fences) with this exact structure:
   "wall_color": "#EDE8DF",
   "floor_color": "#A98B6D",
   "floor_type": "wood",
+  "wall_sample_bbox": [x_min, y_min, x_max, y_max],
+  "floor_sample_bbox": [x_min, y_min, x_max, y_max],
   "objects": [
     {
       "label": "grey fabric sofa",
@@ -87,6 +89,10 @@ Rules:
 - Max 20 objects.
 - Ignore tiny decor (books, cups, vases).
 - colors are hex approximations of the item's dominant color.
+- wall_sample_bbox: a rectangular patch showing ONLY bare wall (no furniture,
+  no art, no windows, no strong shadows) — used to sample the wall material.
+- floor_sample_bbox: a rectangular patch showing ONLY bare floor — used to
+  sample the floor material. Pick the cleanest, most evenly lit areas.
 - features: windows, doors, curtains, framed wall art / picture groups
   ("art"), hanging ceiling lights ("pendant"), and WALL-MOUNTED mirrors
   ("mirror") go in "features" with their bboxes and dominant colors.
@@ -396,6 +402,35 @@ class SceneBuilder:
             ))
         return features
 
+    def _sample_texture(self, hires_photo, det_size, bbox, kind: str):
+        """
+        Cut a clean wall/floor patch from the photo to use as the actual
+        3D material texture — real materials instead of flat colors.
+        Returns a served URL or None.
+        """
+        if not bbox:
+            return None
+        try:
+            from .generation_service import generation_service
+
+            x0, y0, x1, y1 = [float(v) for v in bbox]
+            det_w, det_h = det_size
+            sx, sy = hires_photo.width / det_w, hires_photo.height / det_h
+            crop = hires_photo.crop((
+                int(max(0, x0 * sx)), int(max(0, y0 * sy)),
+                int(min(hires_photo.width, x1 * sx)),
+                int(min(hires_photo.height, y1 * sy)),
+            ))
+            if crop.width < 60 or crop.height < 60:
+                return None  # too small to tile convincingly
+            # Cap texture size; keep it square-ish for clean tiling
+            side = min(crop.width, crop.height, 512)
+            crop = crop.resize((side, side))
+            return generation_service.save_texture(crop, kind)
+        except Exception as e:
+            print(f"[SceneBuilder] Could not sample {kind} texture: {e}")
+            return None
+
     # ---------- main entry ----------
 
     @staticmethod
@@ -426,15 +461,25 @@ class SceneBuilder:
 
         detection = await self.detect_room(detection_base64, image_size)
 
+        hires = self._capped(original, 2048)
+
         est = detection.get("room_estimate") or {}
         room = RoomShell(
             width_m=self._clamp(float(est.get("width_m") or 4.0), 2.0, 10.0),
             depth_m=self._clamp(float(est.get("depth_m") or 3.5), 2.0, 10.0),
             height_m=self._clamp(float(est.get("height_m") or 2.6), 2.2, 4.0),
-            wall_material=MaterialDef(color=detection.get("wall_color") or "#F2EDE4"),
+            wall_material=MaterialDef(
+                color=detection.get("wall_color") or "#F2EDE4",
+                texture_url=self._sample_texture(
+                    hires, image_size, detection.get("wall_sample_bbox"), "wall"
+                ),
+            ),
             floor_material=MaterialDef(
                 color=detection.get("floor_color") or "#A98B6D",
                 texture=detection.get("floor_type"),
+                texture_url=self._sample_texture(
+                    hires, image_size, detection.get("floor_sample_bbox"), "floor"
+                ),
             ),
         )
 

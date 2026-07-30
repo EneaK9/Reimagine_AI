@@ -17,6 +17,7 @@ class MaterialDef(BaseModel):
     """Simple PBR-ish material description the editor can apply."""
     color: str = "#CCCCCC"  # hex color
     texture: Optional[str] = None  # texture preset name (e.g. "oak_01"), optional
+    texture_url: Optional[str] = None  # real texture sampled from the user's photo
     roughness: float = 0.9
     metalness: float = 0.0
 

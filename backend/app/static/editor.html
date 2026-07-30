@@ -32,16 +32,7 @@
     <button class="btn" id="undoBtn">↩ Undo</button>
     <button class="btn" id="aiBtn">✨ AI edit</button>
     <button class="btn" id="genBtn">🪄 Realistic</button>
-    <button class="btn" id="renderBtn">📸 Render</button>
     <span id="saveState" style="color:#9C9284; font-size:12px; align-self:center;"></span>
-  </div>
-</div>
-
-<div id="render-overlay" style="display:none; position:absolute; inset:0; background:rgba(10,9,7,.93); z-index:20; padding:16px; box-sizing:border-box; flex-direction:column; gap:10px; align-items:center; justify-content:center;">
-  <img id="render-result" style="max-width:100%; max-height:82%; border-radius:14px; box-shadow:0 8px 40px rgba(0,0,0,.6);" />
-  <div style="display:flex; gap:10px;">
-    <a class="btn" id="renderDownload" download="reimagine-render.png" style="text-decoration:none;">⬇ Download</a>
-    <button class="btn primary" id="renderClose">Close</button>
   </div>
 </div>
 
@@ -197,57 +188,11 @@ async function standaloneEnhance() {
   }
 }
 
-function captureCanvas() {
-  // Hide helpers for a clean shot
-  const hadHighlight = !!highlight;
-  if (highlight) { scene3.remove(highlight); }
-  if (roomMeshes.grid) roomMeshes.grid.visible = false;
-  renderer.render(scene3, camera);
-  const shot = renderer.domElement.toDataURL('image/jpeg', 0.92);
-  if (roomMeshes.grid) roomMeshes.grid.visible = true;
-  if (hadHighlight && selected?.type === 'object') {
-    highlight = new THREE.BoxHelper(objectGroups.get(selected.id), 0xC98E5A);
-    scene3.add(highlight);
-  }
-  return shot;
-}
-
-function showRender(dataUrl) {
-  const overlay = document.getElementById('render-overlay');
-  document.getElementById('render-result').src = dataUrl;
-  document.getElementById('renderDownload').href = dataUrl;
-  overlay.style.display = 'flex';
-}
-document.getElementById('renderClose').onclick = () =>
-  document.getElementById('render-overlay').style.display = 'none';
-
-async function standalonePhotorealRender() {
-  const btn = document.getElementById('renderBtn');
-  btn.disabled = true;
-  setSaveState('Rendering photoreal image… (~30s)');
-  try {
-    const shot = captureCanvas();
-    const resp = await apiFetch(`/scenes/${standaloneSceneId}/render`, {
-      method: 'POST',
-      body: JSON.stringify({ image_base64: shot }),
-    });
-    showRender(resp.image);
-    setSaveState('');
-  } catch (e) {
-    setSaveState('Render failed — try again in a minute');
-    console.error(e);
-    setTimeout(() => setSaveState(''), 5000);
-  } finally {
-    btn.disabled = false;
-  }
-}
-
 async function standaloneInit() {
   document.getElementById('topbar').style.display = 'flex';
   document.getElementById('undoBtn').onclick = standaloneUndo;
   document.getElementById('aiBtn').onclick = standaloneAiEdit;
   document.getElementById('genBtn').onclick = standaloneEnhance;
-  document.getElementById('renderBtn').onclick = standalonePhotorealRender;
   window.addEventListener('beforeunload', flushOpsStandalone);
   try {
     const [scene, cat] = await Promise.all([
@@ -300,7 +245,7 @@ const addBtn = document.getElementById('addBtn');
 // ---------------- Renderer setup ----------------
 function initGL() {
   const host = document.getElementById('canvas-host');
-  renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -492,6 +437,16 @@ function buildFeature(f, room) {
   return g;
 }
 
+const texLoader = new THREE.TextureLoader();
+function photoTexture(url, repeatX, repeatY) {
+  const src = url.startsWith('http') ? url : location.origin + url;
+  const tex = texLoader.load(src);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.repeat.set(repeatX, repeatY);
+  return tex;
+}
+
 function buildRoom() {
   ['walls', 'floor', 'ceiling', 'grid', 'features'].forEach(k => {
     if (roomMeshes[k]) { scene3.remove(roomMeshes[k]); roomMeshes[k] = null; }
@@ -501,7 +456,11 @@ function buildRoom() {
 
   // Interior-visible box for walls+ceiling (BackSide: near walls auto-hide)
   const wallGeo = new THREE.BoxGeometry(w, h, d);
-  const wallMat = mat(r.wall_material.color, { roughness: 0.95 });
+  // Photo-sampled wall texture when available (real material from the photo)
+  const wallMat = r.wall_material.texture_url
+    ? mat('#FFFFFF', { roughness: 0.95,
+        extra: { map: photoTexture(r.wall_material.texture_url, Math.max(2, w / 1.4), Math.max(1.5, h / 1.4)) } })
+    : mat(r.wall_material.color, { roughness: 0.95 });
   const ceilMat = mat(r.ceiling_material?.color || '#ffffff', { roughness: 0.95 });
   const invisible = new THREE.MeshBasicMaterial({ visible: false });
   wallMat.side = THREE.BackSide; ceilMat.side = THREE.BackSide;
@@ -513,11 +472,17 @@ function buildRoom() {
   roomMeshes.walls = walls;
 
   const kind = floorKind(r.floor_material);
-  const floorMat = mat(kind ? '#FFFFFF' : r.floor_material.color, { roughness: 0.9 });
-  if (kind) {
-    const tex = makeFloorTexture(kind, r.floor_material.color);
-    tex.repeat.set(Math.max(1, w / 2.2), Math.max(1, d / 2.2));
-    floorMat.map = tex;
+  let floorMat;
+  if (r.floor_material.texture_url) {
+    floorMat = mat('#FFFFFF', { roughness: 0.9,
+      extra: { map: photoTexture(r.floor_material.texture_url, Math.max(2, w / 1.6), Math.max(2, d / 1.6)) } });
+  } else {
+    floorMat = mat(kind ? '#FFFFFF' : r.floor_material.color, { roughness: 0.9 });
+    if (kind) {
+      const tex = makeFloorTexture(kind, r.floor_material.color);
+      tex.repeat.set(Math.max(1, w / 2.2), Math.max(1, d / 2.2));
+      floorMat.map = tex;
+    }
   }
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat);
   floor.rotation.x = -Math.PI / 2;
@@ -1084,6 +1049,7 @@ document.getElementById('shell-color').addEventListener('change', (e) => {
   }
   const key = selected.type === 'floor' ? 'floor_material' : 'wall_material';
   sceneData.room[key].color = e.target.value;
+  sceneData.room[key].texture_url = null; // explicit recolor -> flat color
   buildRoom();
   emitOp({ op: 'recolor', target: selected.type === 'floor' ? 'floor' : 'wall', value: { color: e.target.value } });
 });
@@ -1174,14 +1140,6 @@ window.RAI = {
     sceneData = typeof data === 'string' ? JSON.parse(data) : data;
     deselect(false);
     rebuildAll();
-  },
-  // Screenshot of the current 3D view (Flutter calls this for photoreal rendering)
-  captureRender() {
-    return captureCanvas();
-  },
-  // Show a photoreal result pushed back from Flutter
-  showRender(dataUrl) {
-    showRender(dataUrl);
   },
 };
 

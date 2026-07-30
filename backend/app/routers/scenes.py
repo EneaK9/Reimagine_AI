@@ -30,13 +30,14 @@ router = APIRouter(prefix="/scenes", tags=["3D Scenes"])
 
 @router.get("/assets/{filename}")
 async def get_generated_asset(filename: str):
-    """Serve an AI-generated furniture GLB."""
+    """Serve a generated asset: furniture GLB or photo-sampled texture."""
     from fastapi.responses import FileResponse
 
     path = generation_service.asset_path(filename)
     if not path:
         raise HTTPException(status_code=404, detail="Asset not found")
-    return FileResponse(path, media_type="model/gltf-binary")
+    media_type = "image/jpeg" if filename.endswith(".jpg") else "model/gltf-binary"
+    return FileResponse(path, media_type=media_type)
 
 
 @router.get("/catalog")
@@ -259,40 +260,6 @@ async def enhance_scene(
     updated = scene_service.update_asset_refs(db, scene_id, asset_urls, current_user["id"])
     print(f"[Scenes] Enhanced {len(asset_urls)}/{len(candidates)} objects in {scene_id}")
     return updated
-
-
-@router.post("/{scene_id}/render")
-async def photoreal_render(
-    scene_id: str,
-    payload: dict,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    Photorealistic render of the current 3D view (Archsynth-style):
-    the editor sends a screenshot of its canvas; Gemini re-renders it as a
-    photoreal interior photo while preserving layout, objects and colors.
-    Body: {"image_base64": "<canvas screenshot>"}
-    """
-    from ..services.gemini_service import gemini_service
-
-    scene = scene_service.get_scene(db, scene_id, current_user["id"])
-    if not scene:
-        raise HTTPException(status_code=404, detail="Scene not found")
-
-    image_base64 = payload.get("image_base64")
-    if not image_base64:
-        raise HTTPException(status_code=400, detail="image_base64 required")
-
-    result = await gemini_service.photoreal_render(
-        image_base64, room_type=scene.data.room_type
-    )
-    if not result:
-        raise HTTPException(
-            status_code=502,
-            detail="Render failed (Gemini may be rate-limited — try again in a minute).",
-        )
-    return {"scene_id": scene_id, "image": result}
 
 
 @router.delete("/{scene_id}")

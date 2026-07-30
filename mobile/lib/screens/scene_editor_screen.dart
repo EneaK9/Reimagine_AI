@@ -5,7 +5,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../config/api_config.dart';
 import '../providers/scene_provider.dart';
-import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 
 /// Interactive 3D room editor.
@@ -149,43 +148,6 @@ class _SceneEditorScreenState extends State<SceneEditorScreen> {
     messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Future<void> _onPhotorealRender() async {
-    final provider = context.read<SceneProvider>();
-    if (_webView == null || provider.sceneId == null) return;
-
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.showSnackBar(const SnackBar(
-      content: Text('Creating photoreal render… (~30s)'),
-      duration: Duration(minutes: 2),
-    ));
-
-    try {
-      // Grab a clean screenshot of the 3D canvas from the editor
-      final shot = await _webView!.evaluateJavascript(
-        source: 'window.RAI.captureRender();',
-      ) as String?;
-      if (shot == null || shot.isEmpty) {
-        throw Exception('Could not capture the 3D view');
-      }
-
-      final image = await ApiService().renderScene(provider.sceneId!, shot);
-      messenger.hideCurrentSnackBar();
-      if (image == null || !mounted) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Render failed — try again in a minute')),
-        );
-        return;
-      }
-      // Show the result inside the editor's overlay viewer
-      await _webView!.evaluateJavascript(
-        source: 'window.RAI.showRender(${jsonEncode(image)});',
-      );
-    } catch (e) {
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(SnackBar(content: Text('Render failed: $e')));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SceneProvider>();
@@ -231,11 +193,6 @@ class _SceneEditorScreenState extends State<SceneEditorScreen> {
             onPressed: provider.sceneId != null && !provider.isSaving
                 ? _onEnhance
                 : null,
-          ),
-          IconButton(
-            tooltip: 'Photoreal render',
-            icon: const Icon(Icons.photo_camera),
-            onPressed: provider.sceneId != null ? _onPhotorealRender : null,
           ),
         ],
       ),
