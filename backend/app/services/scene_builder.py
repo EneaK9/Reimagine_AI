@@ -56,6 +56,7 @@ Return ONLY valid JSON (no markdown fences) with this exact structure:
       "color": "#8A8A8A",
       "width_m": 2.0,
       "against_wall": true,
+      "plan_pos": {"x_m": 0.4, "z_m": -1.2, "rot_y_deg": 0},
       "relations": [
         {"type": "against", "target": "back_wall"},
         {"type": "beside", "target": 0, "side": "right"},
@@ -108,6 +109,14 @@ Rules:
   Targets are 0-based indices into this same objects array.
 - EVERY object MUST have at least one relation — look at the photo and state
   where each thing stands relative to walls and other furniture.
+- plan_pos: draw a TOP-DOWN FLOOR PLAN of the room in your head and give each
+  object's center position in meters. Coordinate system: origin at the room
+  center. x runs left (-width/2) to right (+width/2) as seen in the photo.
+  z runs from the back wall (-depth/2, the wall facing the camera) to the
+  camera (+depth/2). rot_y_deg: 0 = the object's front faces the camera,
+  90 = faces the right wall, -90 = faces the left wall, 180 = faces the back
+  wall. Be consistent with your room_estimate dimensions. This is the most
+  important field for placing objects correctly — take your time with it.
 - Max 20 objects.
 - Ignore tiny decor (books, cups, vases).
 - colors are hex approximations of the item's dominant color.
@@ -265,6 +274,10 @@ full JSON in the exact same schema. Check specifically:
 4. Sizes: fix clearly wrong width_m estimates (a bed is ~1.4-2.0m wide,
    a nightstand ~0.4-0.6m).
 5. room_estimate, wall/floor colors and sample bboxes: adjust if wrong.
+6. plan_pos: mentally draw the top-down floor plan and verify each object's
+   x_m/z_m matches where it stands in the photo (origin = room center,
+   back wall at z=-depth/2). Fix any object that would end up on the wrong
+   side of the room or overlapping another object's footprint.
 
 Return ONLY the corrected JSON, same schema, no commentary."""
 
@@ -374,6 +387,20 @@ Return ONLY the corrected JSON, same schema, no commentary."""
                 rot_y = 90.0   # left wall → face right
             elif det.get("against_wall") and pos_x > room.width_m * 0.3:
                 rot_y = -90.0  # right wall → face left
+
+            # The model's own floor-plan coordinates are the PRIMARY placement
+            # signal — it reads the photo's layout better than bbox+depth
+            # trigonometry. Depth math above remains the fallback.
+            plan = det.get("plan_pos") or {}
+            try:
+                px, pz = float(plan["x_m"]), float(plan["z_m"])
+                if abs(px) <= room.width_m / 2 + 0.5 and abs(pz) <= room.depth_m / 2 + 0.5:
+                    pos_x = self._clamp(px, -room.width_m / 2 + margin_x, room.width_m / 2 - margin_x)
+                    pos_z = self._clamp(pz, -room.depth_m / 2 + margin_z, room.depth_m / 2 - margin_z)
+                    if "rot_y_deg" in plan:
+                        rot_y = float(plan["rot_y_deg"]) % 360
+            except (KeyError, TypeError, ValueError):
+                pass
 
             color = det.get("color") if isinstance(det.get("color"), str) else None
             obj = SceneObject(
