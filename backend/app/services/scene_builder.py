@@ -61,7 +61,8 @@ Return ONLY valid JSON (no markdown fences) with this exact structure:
     {"type": "curtain", "bbox": [x_min, y_min, x_max, y_max], "color": "#8A8A8A", "width_m": 1.5},
     {"type": "door", "bbox": [x_min, y_min, x_max, y_max], "color": "#F0F0F0", "width_m": 0.9},
     {"type": "art", "bbox": [x_min, y_min, x_max, y_max], "color": "#D8D2C4", "width_m": 0.5},
-    {"type": "pendant", "bbox": [x_min, y_min, x_max, y_max], "color": "#E8E4DA", "width_m": 0.35}
+    {"type": "pendant", "bbox": [x_min, y_min, x_max, y_max], "color": "#E8E4DA", "width_m": 0.35},
+    {"type": "mirror", "bbox": [x_min, y_min, x_max, y_max], "color": "#C3D3DC", "width_m": 0.6}
   ]
 }
 
@@ -69,7 +70,9 @@ Rules:
 - bbox is in pixel coordinates of THIS image (integers).
 - category must be a simple generic furniture type: sofa, armchair, chair, table,
   coffee_table, desk, bed, nightstand, wardrobe, dresser, bookshelf, tv, tv_stand,
-  lamp_floor, lamp_table, rug, plant, mirror, ottoman, sideboard.
+  lamp_floor, lamp_table, rug, plant, mirror, ottoman, sideboard, console, bench,
+  stool, fridge, stove, kitchen_cabinet, kitchen_island, sink, toilet, bathtub,
+  shower, washing_machine. Works for ANY room: kitchen, bathroom, office, hallway.
 - ONLY include free-standing furniture that sits on the floor (or on furniture,
   like a table lamp on a nightstand).
 - Be EXHAUSTIVE: list EVERY piece of floor furniture, including partially
@@ -85,9 +88,11 @@ Rules:
 - Ignore tiny decor (books, cups, vases).
 - colors are hex approximations of the item's dominant color.
 - features: windows, doors, curtains, framed wall art / picture groups
-  ("art"), and hanging ceiling lights ("pendant") go in "features" with their
-  bboxes and dominant colors. A group of small frames close together = one
-  "art" feature with a bbox around the whole group. Max 10 features.
+  ("art"), hanging ceiling lights ("pendant"), and WALL-MOUNTED mirrors
+  ("mirror") go in "features" with their bboxes and dominant colors.
+  A freestanding mirror on the floor is an OBJECT; a mirror hanging on the
+  wall is a FEATURE. A group of small frames close together = one "art"
+  feature with a bbox around the whole group. Max 10 features.
 """
 
 
@@ -215,6 +220,12 @@ class SceneBuilder:
                 continue
             dims = list(entry["dims_m"])
             asset_ref = entry["id"]
+            # Size the object from the photo, not the catalog default:
+            # scale footprint by the detected real-world width.
+            det_width = det.get("width_m")
+            if det_width:
+                ratio = self._clamp(float(det_width) / dims[0], 0.6, 1.6)
+                dims = [round(dims[0] * ratio, 3), dims[1], round(dims[2] * ratio, 3)]
 
             # Horizontal position from bbox center
             cx_norm = ((x0 + x1) / 2.0) / img_w  # 0..1 left→right
@@ -225,15 +236,21 @@ class SceneBuilder:
                 room.width_m / 2 - margin_x,
             )
 
-            # Depth position from mean depth inside the bbox (closer → larger z)
+            # Depth position (closer → larger z). Sample the BOTTOM strip of
+            # the bbox — that's where the object touches the floor; the full
+            # bbox includes background wall for tall/thin objects. Blend with
+            # the vertical image position (lower in frame = closer to camera).
             closeness = 0.5
             if depth_map is not None:
                 dh, dw = depth_map.shape
                 bx0, bx1 = int(x0 / img_w * dw), max(int(x1 / img_w * dw), int(x0 / img_w * dw) + 1)
-                by0, by1 = int(y0 / img_h * dh), max(int(y1 / img_h * dh), int(y0 / img_h * dh) + 1)
-                patch = depth_map[by0:by1, bx0:bx1]
+                strip_top = int((y1 - (y1 - y0) * 0.25) / img_h * dh)
+                by1 = max(int(y1 / img_h * dh), strip_top + 1)
+                patch = depth_map[strip_top:by1, bx0:bx1]
                 if patch.size:
-                    closeness = float(np.median(patch))
+                    depth_closeness = float(np.median(patch))
+                    y_prior = self._clamp(y1 / img_h, 0.0, 1.0)
+                    closeness = 0.65 * depth_closeness + 0.35 * y_prior
 
             margin_z = dims[2] / 2.0 + 0.05
             if det.get("against_wall"):
@@ -312,6 +329,7 @@ class SceneBuilder:
             "curtain": {"bottom_m": 0.05, "height_m": room.height_m - 0.2, "color": "#B9B2A6"},
             "art": {"bottom_m": 1.2, "height_m": 0.7, "color": "#D8D2C4"},
             "pendant": {"bottom_m": 0.0, "height_m": 0.8, "color": "#E8E4DA"},
+            "mirror": {"bottom_m": 1.0, "height_m": 0.7, "color": "#C3D3DC"},
         }
         features: List[WallFeature] = []
         for det in detected[:10]:

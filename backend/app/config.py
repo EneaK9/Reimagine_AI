@@ -42,7 +42,8 @@ class Settings(BaseSettings):
     # Image-to-3D generation (per-object realistic meshes via fal.ai)
     # Set FAL_API_KEY in .env to enable the "Make realistic" feature.
     fal_api_key: str = ""
-    image_to_3d_model: str = "fal-ai/trellis"
+    # TRELLIS.2: much better geometry/texture than v1 for furniture
+    image_to_3d_model: str = "fal-ai/trellis-2"
     
     class Config:
         env_file = ".env"

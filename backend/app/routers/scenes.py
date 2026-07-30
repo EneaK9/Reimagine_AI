@@ -261,6 +261,40 @@ async def enhance_scene(
     return updated
 
 
+@router.post("/{scene_id}/render")
+async def photoreal_render(
+    scene_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Photorealistic render of the current 3D view (Archsynth-style):
+    the editor sends a screenshot of its canvas; Gemini re-renders it as a
+    photoreal interior photo while preserving layout, objects and colors.
+    Body: {"image_base64": "<canvas screenshot>"}
+    """
+    from ..services.gemini_service import gemini_service
+
+    scene = scene_service.get_scene(db, scene_id, current_user["id"])
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    image_base64 = payload.get("image_base64")
+    if not image_base64:
+        raise HTTPException(status_code=400, detail="image_base64 required")
+
+    result = await gemini_service.photoreal_render(
+        image_base64, room_type=scene.data.room_type
+    )
+    if not result:
+        raise HTTPException(
+            status_code=502,
+            detail="Render failed (Gemini may be rate-limited — try again in a minute).",
+        )
+    return {"scene_id": scene_id, "image": result}
+
+
 @router.delete("/{scene_id}")
 async def delete_scene(
     scene_id: str,
