@@ -23,15 +23,17 @@ class MaterialDef(BaseModel):
 
 class WallFeature(BaseModel):
     """
-    Something on a wall: window, door, or curtain.
+    Something on a wall or ceiling: window, door, curtain, art, pendant lamp.
     Rendered as part of the shell (recolorable, not movable like furniture).
-    wall: back (the wall facing the camera in the photo) | left | right | front.
+    wall: back (the wall facing the camera in the photo) | left | right | front | ceiling.
     center_x_m: offset along the wall from its center, in meters.
+    center_z_m: used only for ceiling features (pendants): z position in the room.
     """
     id: str
-    type: str  # window | door | curtain
+    type: str  # window | door | curtain | art | pendant
     wall: str = "back"
     center_x_m: float = 0.0
+    center_z_m: float = 0.0
     width_m: float = 1.2
     height_m: float = 1.4
     bottom_m: float = 0.8

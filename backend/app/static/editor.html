@@ -354,6 +354,36 @@ function buildFeature(f, room) {
     const knob = new THREE.Mesh(new THREE.SphereGeometry(0.03, 12, 10), mat('#B8A97C', { metalness: 0.7, roughness: 0.3 }));
     knob.position.set(f.width_m * 0.38, 0, 0.045);
     g.add(slab, knob);
+  } else if (f.type === 'art') {
+    // A framed picture (or a gallery group rendered as a grid of frames)
+    const cols = f.width_m > 1.2 ? 3 : (f.width_m > 0.7 ? 2 : 1);
+    const rows = f.height_m > 0.9 ? 2 : 1;
+    const gap = 0.05;
+    const fw = (f.width_m - gap * (cols - 1)) / cols;
+    const fh = (f.height_m - gap * (rows - 1)) / rows;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const frame = box(fw, fh, 0.025, '#F5F2EA');
+        const picture = box(fw * 0.82, fh * 0.8, 0.01, shade(f.color, 0.9 + ((r * cols + c) % 3) * 0.08));
+        frame.position.set(-f.width_m / 2 + fw / 2 + c * (fw + gap), f.height_m / 2 - fh / 2 - r * (fh + gap), 0);
+        picture.position.copy(frame.position); picture.position.z = 0.015;
+        g.add(frame, picture);
+      }
+    }
+  } else if (f.type === 'pendant') {
+    // Hanging ceiling light: cord + shade with a soft glow
+    const drop = f.height_m;
+    const cord = cyl(0.008, drop * 0.6, '#4A4640');
+    cord.position.y = drop * 0.2;
+    const shadeM = new THREE.Mesh(
+      new THREE.SphereGeometry(f.width_m / 2, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.6),
+      mat(f.color, { extra: { side: THREE.DoubleSide, emissive: new THREE.Color('#FFF3DC').multiplyScalar(0.35) } })
+    );
+    shadeM.position.y = -drop * 0.18;
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8),
+      mat('#FFF6E0', { extra: { emissive: new THREE.Color('#FFE9B8').multiplyScalar(0.9) } }));
+    bulb.position.y = -drop * 0.25;
+    g.add(cord, shadeM, bulb);
   } else { // curtain: vertical slats faking folds
     const n = Math.max(4, Math.round(f.width_m * 5));
     const slatW = f.width_m / n;
@@ -367,6 +397,11 @@ function buildFeature(f, room) {
   const y = f.bottom_m + f.height_m / 2;
   const inset = 0.04;
   const w = room.width_m, d = room.depth_m;
+  if (f.wall === 'ceiling') {
+    g.position.set(f.center_x_m, room.height_m - f.height_m * 0.2 - 0.02, f.center_z_m || 0);
+    g.userData = { featureId: f.id, featureType: f.type };
+    return g;
+  }
   if (f.wall === 'back') {
     g.position.set(f.center_x_m, y, -d / 2 + inset);
   } else if (f.wall === 'front') {

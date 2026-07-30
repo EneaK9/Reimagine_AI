@@ -232,11 +232,16 @@ async def enhance_scene(
 
     async def generate(obj):
         x0, y0, x1, y1 = obj.source["bbox"]
+        # Bboxes are in detection-image coordinates; the stored photo is
+        # higher resolution — scale so small objects get real pixels.
+        src_w, src_h = obj.source.get("img_size") or (photo.width, photo.height)
+        sx, sy = photo.width / src_w, photo.height / src_h
+        x0, y0, x1, y1 = x0 * sx, y0 * sy, x1 * sx, y1 * sy
         # Pad the crop a little for context
         pad_x, pad_y = int((x1 - x0) * 0.08), int((y1 - y0) * 0.08)
         crop = photo.crop((
-            max(0, x0 - pad_x), max(0, y0 - pad_y),
-            min(photo.width, x1 + pad_x), min(photo.height, y1 + pad_y),
+            max(0, int(x0) - pad_x), max(0, int(y0) - pad_y),
+            min(photo.width, int(x1) + pad_x), min(photo.height, int(y1) + pad_y),
         ))
         async with semaphore:
             url = await generation_service.image_to_glb(crop, label=obj.label)

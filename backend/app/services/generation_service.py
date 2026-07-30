@@ -61,32 +61,51 @@ class GenerationService:
 
     # ---------- image -> GLB ----------
 
-    def _remove_background(self, image: Image.Image, label: str) -> Image.Image:
+    _rembg_sessions: dict = {}
+
+    def _rembg_session(self, model_name: str):
+        if model_name not in self._rembg_sessions:
+            from rembg import new_session
+
+            print(f"[Gen3D] Loading segmentation model '{model_name}'...")
+            self._rembg_sessions[model_name] = new_session(model_name)
+        return self._rembg_sessions[model_name]
+
+    def _remove_background(self, image: Image.Image, label: str) -> Optional[Image.Image]:
         """
         Cut the furniture out of its crop. Without this, the image-to-3D
         model reconstructs the room background as part of the mesh
-        (result: object embedded in a dark slab).
+        (result: object embedded in a dark slab). Tries the fast u2net
+        model first, then the stronger isnet for hard cases (dark objects
+        on dark backgrounds). Returns None when both fail — sending a raw
+        crop produces slab meshes, so the caller keeps the procedural model.
         """
         try:
             from rembg import remove
 
             import numpy as np
 
-            cut = remove(image.convert("RGB"))
-            # Sanity check: if almost nothing survived, the segmentation
-            # failed — better to send the original crop.
-            alpha = np.asarray(cut.getchannel("A"))
-            coverage = float((alpha > 30).mean())
-            if coverage < 0.05:
-                print(f"[Gen3D] Background removal left too little for '{label}'; using raw crop")
-                return image
-            return cut
+            for model_name in ("u2net", "isnet-general-use"):
+                try:
+                    cut = remove(image.convert("RGB"), session=self._rembg_session(model_name))
+                except Exception as e:
+                    print(f"[Gen3D] Segmentation model {model_name} failed for '{label}': {e}")
+                    continue
+                alpha = np.asarray(cut.getchannel("A"))
+                coverage = float((alpha > 30).mean())
+                if coverage >= 0.05:
+                    return cut
+                print(f"[Gen3D] {model_name} left too little of '{label}' "
+                      f"({coverage:.0%}); trying next model")
+
+            print(f"[Gen3D] Background removal failed for '{label}' — keeping procedural model")
+            return None
         except ImportError:
             print("[Gen3D] rembg not installed — sending raw crop (pip install rembg)")
             return image
         except Exception as e:
-            print(f"[Gen3D] Background removal failed for '{label}': {e}")
-            return image
+            print(f"[Gen3D] Background removal failed for '{label}' — keeping procedural: {e}")
+            return None
 
     MIN_CROP_PX = 40       # below this the crop carries no usable detail
     TARGET_CROP_PX = 512   # upscale small crops so segmentation + 3D work well
@@ -121,6 +140,8 @@ class GenerationService:
 
         # Background removal is CPU-bound; keep it off the event loop
         cut = await asyncio.to_thread(self._remove_background, prepared, label)
+        if cut is None:
+            return None
 
         buf = BytesIO()
         if cut.mode == "RGBA":

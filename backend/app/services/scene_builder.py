@@ -59,7 +59,9 @@ Return ONLY valid JSON (no markdown fences) with this exact structure:
   "features": [
     {"type": "window", "bbox": [x_min, y_min, x_max, y_max], "color": "#FFFFFF", "width_m": 1.5},
     {"type": "curtain", "bbox": [x_min, y_min, x_max, y_max], "color": "#8A8A8A", "width_m": 1.5},
-    {"type": "door", "bbox": [x_min, y_min, x_max, y_max], "color": "#F0F0F0", "width_m": 0.9}
+    {"type": "door", "bbox": [x_min, y_min, x_max, y_max], "color": "#F0F0F0", "width_m": 0.9},
+    {"type": "art", "bbox": [x_min, y_min, x_max, y_max], "color": "#D8D2C4", "width_m": 0.5},
+    {"type": "pendant", "bbox": [x_min, y_min, x_max, y_max], "color": "#E8E4DA", "width_m": 0.35}
   ]
 }
 
@@ -70,19 +72,22 @@ Rules:
   lamp_floor, lamp_table, rug, plant, mirror, ottoman, sideboard.
 - ONLY include free-standing furniture that sits on the floor (or on furniture,
   like a table lamp on a nightstand).
-- DO include even partially visible or background items: potted plants,
-  nightstands, side tables, table lamps, floor lamps, benches, poufs, rugs.
-  Bedrooms usually have nightstands beside the bed — look carefully.
-- Do NOT include: curtains, drapes, blinds, windows, doors, wall art, picture
-  frames, posters, ceiling lights, pendant lamps, chandeliers, radiators,
-  shelves mounted on walls, pillows, blankets, or anything attached to a wall
-  or ceiling. These are part of the room, not furniture objects.
+- Be EXHAUSTIVE: list EVERY piece of floor furniture, including partially
+  visible or background items: potted plants, nightstands, side tables,
+  table lamps, floor lamps, benches, poufs, rugs. If the same item appears
+  twice (e.g. TWO nightstands, TWO lamps), output a separate entry for EACH.
+  Bedrooms usually have a nightstand on each side of the bed — look carefully.
+- Do NOT put in objects: curtains, windows, doors, wall art, pendant lights,
+  chandeliers, radiators, wall shelves, pillows, blankets — anything attached
+  to a wall or ceiling belongs in "features" or nowhere.
 - width_m is your best real-world width estimate in meters.
-- Include every piece of floor furniture you can find (max 15 objects).
-- Ignore small decor (books, cups, frames).
+- Max 20 objects.
+- Ignore tiny decor (books, cups, vases).
 - colors are hex approximations of the item's dominant color.
-- features: windows, doors, and curtains go in "features" (NOT in objects),
-  with their bboxes and dominant colors. Max 6 features.
+- features: windows, doors, curtains, framed wall art / picture groups
+  ("art"), and hanging ceiling lights ("pendant") go in "features" with their
+  bboxes and dominant colors. A group of small frames close together = one
+  "art" feature with a bbox around the whole group. Max 10 features.
 """
 
 
@@ -189,7 +194,7 @@ class SceneBuilder:
         img_w, img_h = image_size
         objects: List[SceneObject] = []
 
-        for det in detected[:15]:
+        for det in detected[:20]:
             bbox = det.get("bbox") or [0, 0, img_w, img_h]
             try:
                 x0, y0, x1, y1 = [float(v) for v in bbox]
@@ -260,6 +265,7 @@ class SceneBuilder:
                 source={
                     "detected_from": "photo",
                     "bbox": [int(x0), int(y0), int(x1), int(y1)],
+                    "img_size": [img_w, img_h],  # bbox coordinate space
                     "raw_category": det.get("category"),
                 },
             )
@@ -304,9 +310,11 @@ class SceneBuilder:
             "window": {"bottom_m": 0.8, "height_m": 1.3, "color": "#EAF2F8"},
             "door": {"bottom_m": 0.0, "height_m": 2.0, "color": "#EFEBE2"},
             "curtain": {"bottom_m": 0.05, "height_m": room.height_m - 0.2, "color": "#B9B2A6"},
+            "art": {"bottom_m": 1.2, "height_m": 0.7, "color": "#D8D2C4"},
+            "pendant": {"bottom_m": 0.0, "height_m": 0.8, "color": "#E8E4DA"},
         }
         features: List[WallFeature] = []
-        for det in detected[:6]:
+        for det in detected[:10]:
             ftype = (det.get("type") or "").strip().lower()
             if ftype not in defaults:
                 continue
@@ -316,6 +324,28 @@ class SceneBuilder:
             except (TypeError, ValueError):
                 continue
             cx_norm = ((x0 + x1) / 2.0) / img_w
+
+            if ftype == "pendant":
+                # Ceiling feature: x from the photo; hang it in the back
+                # half of the room where pendants usually read best.
+                d = defaults[ftype]
+                width = self._clamp(float(det.get("width_m") or 0.35), 0.15, 1.2)
+                height = self._clamp(float(det.get("height_m") or d["height_m"]),
+                                     0.3, room.height_m * 0.6)
+                center_x = self._clamp((cx_norm - 0.5) * room.width_m,
+                                       -room.width_m / 2 + 0.3, room.width_m / 2 - 0.3)
+                features.append(WallFeature(
+                    id=f"pendant_{uuid.uuid4().hex[:6]}",
+                    type="pendant",
+                    wall="ceiling",
+                    center_x_m=round(center_x, 3),
+                    center_z_m=round(-room.depth_m * 0.2, 3),
+                    width_m=round(width, 3),
+                    height_m=round(height, 3),
+                    bottom_m=0.0,
+                    color=det.get("color") or d["color"],
+                ))
+                continue
 
             # Which wall? Extreme left/right of the frame -> side walls,
             # otherwise the back wall (the one facing the camera).
@@ -350,22 +380,32 @@ class SceneBuilder:
 
     # ---------- main entry ----------
 
+    @staticmethod
+    def _capped(image, max_size: int):
+        w, h = image.size
+        if max(w, h) <= max_size:
+            return image
+        scale = max_size / max(w, h)
+        from PIL import Image as PILImage
+        return image.resize((int(w * scale), int(h * scale)), PILImage.Resampling.LANCZOS)
+
     async def build_scene_from_image(self, image_base64: str):
+        original = depth_service._decode_base64_image(image_base64)
+
+        # Detection runs at higher resolution than depth so small objects
+        # (lamps, nightstands) keep enough pixels to be found and cropped.
+        detection_image = self._capped(original, 1280)
+        image_size = detection_image.size  # (w, h) — bbox coordinate space
+        detection_base64 = depth_service._encode_image_base64(detection_image, "JPEG")
+
         # Depth map (best-effort; placement degrades gracefully without it).
-        # Detection runs on the SAME resized image so bboxes and depth line up.
+        # Bbox->depth sampling is normalized, so different resolutions are fine.
         depth_map = None
         try:
-            depth_map, resized_image = depth_service.generate_depth_map_v2(image_base64)
+            depth_map, _ = depth_service.generate_depth_map_v2(image_base64)
         except Exception as e:
             print(f"[SceneBuilder] Depth estimation unavailable, using layout-only placement: {e}")
-            resized_image = depth_service._decode_base64_image(image_base64)
-            w, h = resized_image.size
-            if max(w, h) > 768:
-                scale = 768 / max(w, h)
-                resized_image = resized_image.resize((int(w * scale), int(h * scale)))
 
-        image_size = resized_image.size  # (w, h)
-        detection_base64 = depth_service._encode_image_base64(resized_image, "JPEG")
         detection = await self.detect_room(detection_base64, image_size)
 
         est = detection.get("room_estimate") or {}
@@ -396,9 +436,9 @@ class SceneBuilder:
             room=room,
             objects=objects,
         )
-        # Return the resized photo too so the caller can persist it
-        # (needed later to crop per-object images for 3D generation).
-        return data, resized_image
+        # Return a high-res copy of the photo for persistence — "Make
+        # realistic" crops per-object images from it, so resolution matters.
+        return data, self._capped(original, 2048)
 
 
 scene_builder = SceneBuilder()
