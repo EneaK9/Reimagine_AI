@@ -55,12 +55,19 @@ Return ONLY valid JSON (no markdown fences) with this exact structure:
       "bbox": [x_min, y_min, x_max, y_max],
       "color": "#8A8A8A",
       "width_m": 2.0,
-      "against_wall": true
+      "against_wall": true,
+      "relations": [
+        {"type": "against", "target": "back_wall"},
+        {"type": "beside", "target": 0, "side": "right"},
+        {"type": "on", "target": 2},
+        {"type": "in_front_of", "target": 0},
+        {"type": "under", "target": "window"}
+      ]
     }
   ],
   "features": [
-    {"type": "window", "bbox": [x_min, y_min, x_max, y_max], "color": "#FFFFFF", "width_m": 1.5},
-    {"type": "curtain", "bbox": [x_min, y_min, x_max, y_max], "color": "#8A8A8A", "width_m": 1.5},
+    {"type": "window", "style": "floor_to_ceiling", "bbox": [x_min, y_min, x_max, y_max], "color": "#FFFFFF", "width_m": 1.5},
+    {"type": "curtain", "style": "sheer", "bbox": [x_min, y_min, x_max, y_max], "color": "#8A8A8A", "width_m": 1.5},
     {"type": "door", "bbox": [x_min, y_min, x_max, y_max], "color": "#F0F0F0", "width_m": 0.9},
     {"type": "art", "bbox": [x_min, y_min, x_max, y_max], "color": "#D8D2C4", "width_m": 0.5},
     {"type": "pendant", "bbox": [x_min, y_min, x_max, y_max], "color": "#E8E4DA", "width_m": 0.35},
@@ -86,6 +93,21 @@ Rules:
   chandeliers, radiators, wall shelves, pillows, blankets — anything attached
   to a wall or ceiling belongs in "features" or nowhere.
 - width_m is your best real-world width estimate in meters.
+- relations describe HOW objects are positioned relative to each other —
+  this is what makes the 3D layout match the photo. Use them generously:
+  * {"type": "against", "target": "back_wall"|"left_wall"|"right_wall"} —
+    the object touches that wall (back wall = the one facing the camera).
+  * {"type": "beside", "target": <objects array index>, "side": "left"|"right"} —
+    touching/adjacent to another object (nightstand beside bed).
+  * {"type": "on", "target": <objects array index>} — sitting ON TOP of
+    another object (table lamp on a nightstand, TV on a tv_stand).
+  * {"type": "in_front_of", "target": <objects array index>} — directly in
+    front of it (coffee table in front of sofa).
+  * {"type": "under", "target": "window"|"mirror"|"art"|"pendant"} — directly
+    below that wall/ceiling feature (console under the mirror).
+  Targets are 0-based indices into this same objects array.
+- EVERY object MUST have at least one relation — look at the photo and state
+  where each thing stands relative to walls and other furniture.
 - Max 20 objects.
 - Ignore tiny decor (books, cups, vases).
 - colors are hex approximations of the item's dominant color.
@@ -96,6 +118,10 @@ Rules:
 - features: windows, doors, curtains, framed wall art / picture groups
   ("art"), hanging ceiling lights ("pendant"), and WALL-MOUNTED mirrors
   ("mirror") go in "features" with their bboxes and dominant colors.
+- windows have a "style": "standard" (normal window), "floor_to_ceiling"
+  (glass from floor to ceiling), or "sliding_door" (glass door to balcony/
+  garden). curtains have "style": "sheer" (translucent voile) or "solid".
+  Only report windows/doors/curtains that are actually visible in the photo.
   A freestanding mirror on the floor is an OBJECT; a mirror hanging on the
   wall is a FEATURE. A group of small frames close together = one "art"
   feature with a bbox around the whole group. Max 10 features.
@@ -117,70 +143,142 @@ class SceneBuilder:
     def __init__(self):
         self._working_gemini_model: str | None = None
 
+    # ---------- provider-agnostic vision analysis ----------
+
+    async def _openai_json(self, prompt: str, image_base64: str) -> Dict[str, Any]:
+        """Ask OpenAI's vision model for a JSON analysis of the photo."""
+        response = await openai_service.client.chat.completions.create(
+            model=settings.openai_vision_model,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:image/jpeg;base64,{image_base64}"
+                    }},
+                ],
+            }],
+            response_format={"type": "json_object"},
+        )
+        return json.loads(_strip_json(response.choices[0].message.content))
+
+    def _gemini_json(self, prompt: str, image_base64: str) -> Optional[Dict[str, Any]]:
+        """Ask Gemini for a JSON analysis (model-name cascade survives retirements)."""
+        if not gemini_service.client:
+            return None
+        import base64 as b64
+        from google.genai import types
+
+        image_bytes = b64.b64decode(
+            image_base64.split(",")[1] if image_base64.startswith("data:") else image_base64
+        )
+        image_part = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+        candidates = list(dict.fromkeys([
+            self._working_gemini_model or settings.gemini_analysis_model,
+            settings.gemini_analysis_model,
+            "gemini-flash-latest",
+            "gemini-3-flash-preview",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+        ]))
+        last_error: Optional[Exception] = None
+        for model in candidates:
+            if not model:
+                continue
+            try:
+                response = gemini_service.client.models.generate_content(
+                    model=model,
+                    contents=[prompt, image_part],
+                    config=types.GenerateContentConfig(response_mime_type="application/json"),
+                )
+                result = json.loads(_strip_json(response.text))
+                if self._working_gemini_model != model:
+                    print(f"[SceneBuilder] Using Gemini model: {model}")
+                    self._working_gemini_model = model
+                return result
+            except Exception as e:
+                last_error = e
+                if any(k in str(e) for k in ("NOT_FOUND", "not found", "404")):
+                    print(f"[SceneBuilder] Gemini model {model} unavailable, trying next")
+                    continue
+                break
+        if last_error:
+            raise last_error
+        return None
+
+    async def _ask_json(self, prompt: str, image_base64: str) -> Dict[str, Any]:
+        """
+        Run a vision->JSON query on the configured provider, falling back
+        to the other one. The provider order comes from settings
+        (scene_analysis_provider: "openai" | "gemini").
+        """
+        order = (
+            ["openai", "gemini"]
+            if settings.scene_analysis_provider.lower() == "openai"
+            else ["gemini", "openai"]
+        )
+        last_error: Optional[Exception] = None
+        for provider in order:
+            try:
+                if provider == "openai":
+                    return await self._openai_json(prompt, image_base64)
+                result = self._gemini_json(prompt, image_base64)
+                if result is not None:
+                    return result
+            except Exception as e:
+                last_error = e
+                print(f"[SceneBuilder] {provider} analysis failed, trying next provider: {e}")
+        raise RuntimeError(f"Room analysis failed on all providers: {last_error}")
+
     async def detect_room(self, image_base64: str, image_size: Tuple[int, int]) -> Dict[str, Any]:
-        """Run furniture/room detection; Gemini first, OpenAI vision fallback."""
+        """Run furniture/room detection on the configured vision provider."""
         width, height = image_size
         prompt = DETECTION_PROMPT + f"\nThe image is {width}x{height} pixels."
+        return await self._ask_json(prompt, image_base64)
 
-        # --- Gemini (primary) ---
-        if gemini_service.client:
-            import base64 as b64
-            from google.genai import types
+    async def refine_detection(
+        self,
+        image_base64: str,
+        image_size: Tuple[int, int],
+        first_pass: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Understanding layer: a second look at the photo WITH the first
+        analysis in hand. Catches missed objects, wrong window styles,
+        wrong walls, and bad size estimates. Falls back to the first pass.
+        """
+        width, height = image_size
+        prompt = f"""You are reviewing a room analysis for a 3D reconstruction.
 
-            image_bytes = b64.b64decode(
-                image_base64.split(",")[1] if image_base64.startswith("data:") else image_base64
-            )
-            image_part = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+Here is the photo ({width}x{height} px) and a first-pass analysis of it:
 
-            # Model names get retired; try a cascade and remember what works
-            candidates = list(dict.fromkeys([
-                self._working_gemini_model or settings.gemini_analysis_model,
-                settings.gemini_analysis_model,
-                "gemini-flash-latest",
-                "gemini-3-flash-preview",
-                "gemini-2.5-flash",
-                "gemini-2.0-flash",
-            ]))
-            for model in candidates:
-                if not model:
-                    continue
-                try:
-                    response = gemini_service.client.models.generate_content(
-                        model=model,
-                        contents=[prompt, image_part],
-                        config=types.GenerateContentConfig(response_mime_type="application/json"),
-                    )
-                    result = json.loads(_strip_json(response.text))
-                    if self._working_gemini_model != model:
-                        print(f"[SceneBuilder] Using Gemini model: {model}")
-                        self._working_gemini_model = model
-                    return result
-                except Exception as e:
-                    err = str(e)
-                    if "NOT_FOUND" in err or "not found" in err or "404" in err:
-                        print(f"[SceneBuilder] Gemini model {model} unavailable, trying next")
-                        continue
-                    print(f"[SceneBuilder] Gemini detection failed, trying OpenAI: {e}")
-                    break
+{json.dumps(first_pass, indent=1)}
 
-        # --- OpenAI vision (fallback) ---
+Carefully compare the analysis against the photo and return the CORRECTED
+full JSON in the exact same schema. Check specifically:
+1. MISSED furniture: nightstands, lamps, plants, stools, side tables —
+   anything on the floor that is not yet in "objects". Add them with bboxes.
+2. Window style: is it really "standard", or is it floor_to_ceiling glazing
+   or a sliding door? Are curtains sheer or solid? Fix "style" fields.
+3. Wrong entries: remove objects that are actually part of another object
+   (pillows on a bed) or that do not exist in the photo.
+4. Sizes: fix clearly wrong width_m estimates (a bed is ~1.4-2.0m wide,
+   a nightstand ~0.4-0.6m).
+5. room_estimate, wall/floor colors and sample bboxes: adjust if wrong.
+
+Return ONLY the corrected JSON, same schema, no commentary."""
+
         try:
-            response = await openai_service.client.chat.completions.create(
-                model=settings.gpt_model,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_base64}"
-                        }},
-                    ],
-                }],
-                max_tokens=2000,
-            )
-            return json.loads(_strip_json(response.choices[0].message.content))
+            refined = await self._ask_json(prompt, image_base64)
+            # Sanity: a valid refinement must keep the core keys
+            if isinstance(refined, dict) and "objects" in refined:
+                n_before = len(first_pass.get("objects") or [])
+                n_after = len(refined.get("objects") or [])
+                print(f"[SceneBuilder] Refinement pass: {n_before} -> {n_after} objects")
+                return refined
         except Exception as e:
-            raise RuntimeError(f"Furniture detection failed (Gemini and OpenAI): {e}")
+            print(f"[SceneBuilder] Refinement pass failed (using first pass): {e}")
+        return first_pass
 
     # ---------- placement ----------
 
@@ -204,8 +302,9 @@ class SceneBuilder:
         """
         img_w, img_h = image_size
         objects: List[SceneObject] = []
+        placed: List[tuple] = []  # (detection_index, SceneObject, det) for relations
 
-        for det in detected[:20]:
+        for det_idx, det in enumerate(detected[:20]):
             bbox = det.get("bbox") or [0, 0, img_w, img_h]
             try:
                 x0, y0, x1, y1 = [float(v) for v in bbox]
@@ -293,12 +392,163 @@ class SceneBuilder:
                 },
             )
             objects.append(obj)
+            placed.append((det_idx, obj, det))
 
-        self._resolve_overlaps(objects, room)
+        # Relationship constraints: snap objects into the arrangements the
+        # photo shows (beside/on/against/in-front-of/under). Two passes so
+        # chains resolve (lamp ON nightstand which is BESIDE the bed).
+        by_det_index = {i: o for i, o, _ in placed}
+        linked: set = set()
+        pinned: set = set()
+
+        # Safety net FIRST: some furniture practically always stands against
+        # a wall. If the model forgot the relation, snap to the nearest wall —
+        # then relations (beside/on/...) align neighbors to final positions.
+        self._snap_wall_huggers(placed, room, pinned)
+
+        for _ in range(2):
+            for _, obj, det in placed:
+                for rel in (det.get("relations") or []):
+                    try:
+                        self._apply_relation(obj, rel, by_det_index, room, linked)
+                        pinned.add(obj.id)
+                    except Exception as e:
+                        print(f"[SceneBuilder] Bad relation {rel}: {e}")
+
+        self._resolve_overlaps(objects, room, linked, pinned)
         return objects
 
-    def _resolve_overlaps(self, objects: List[SceneObject], room: RoomShell) -> None:
-        """Nudge overlapping footprints apart along x (a few passes is enough)."""
+    WALL_HUGGERS = {
+        "bed", "wardrobe", "dresser", "bookshelf", "tv_stand", "sideboard",
+        "console", "desk", "sofa", "fridge", "kitchen_cabinet", "stove",
+        "washing_machine", "toilet", "sink", "bathtub",
+    }
+
+    def _snap_wall_huggers(self, placed, room: RoomShell, pinned: set) -> None:
+        for _, obj, det in placed:
+            if obj.category not in self.WALL_HUGGERS:
+                continue
+            has_against = any(
+                (rel.get("type") == "against")
+                for rel in (det.get("relations") or [])
+            )
+            if has_against or obj.transform.pos[1] > 0.01:
+                continue
+            x, z = obj.transform.pos[0], obj.transform.pos[2]
+            half_d = obj.dimensions_m[2] / 2
+            # Pick the wall from where the object sits in the photo frame:
+            # mid-frame furniture faces the camera -> back wall; only items
+            # at the frame edges belong to the side walls.
+            bbox = (det.get("bbox") or [0, 0, 0, 0])
+            img_size = (obj.source or {}).get("img_size") or [1, 1]
+            try:
+                cx_norm = ((float(bbox[0]) + float(bbox[2])) / 2.0) / max(1.0, float(img_size[0]))
+            except (TypeError, ValueError, IndexError):
+                cx_norm = 0.5
+            if cx_norm < 0.18:
+                wall, gap = "left", (x - half_d) - (-room.width_m / 2)
+            elif cx_norm > 0.82:
+                wall, gap = "right", (room.width_m / 2) - (x + half_d)
+            else:
+                wall, gap = "back", (z - half_d) - (-room.depth_m / 2)
+            # Depth estimation is noisy; for wall-hugging furniture trust the
+            # prior generously (only skip when truly mid-room or already flush)
+            if gap < 0 or gap > max(1.3, room.depth_m * 0.35):
+                continue
+            if wall == "back":
+                obj.transform.pos[2] = -room.depth_m / 2 + half_d + 0.03
+                obj.transform.rot_y_deg = 0.0
+            elif wall == "left":
+                obj.transform.pos[0] = -room.width_m / 2 + half_d + 0.03
+                obj.transform.rot_y_deg = 90.0
+            else:
+                obj.transform.pos[0] = room.width_m / 2 - half_d - 0.03
+                obj.transform.rot_y_deg = -90.0
+            pinned.add(obj.id)
+            print(f"[SceneBuilder] Snapped {obj.category} to {wall} wall (gap {gap:.2f}m)")
+
+    def _apply_relation(self, obj, rel: dict, by_det_index: dict, room: RoomShell, linked: set) -> None:
+        rtype = (rel.get("type") or "").lower()
+        target = rel.get("target")
+
+        if rtype == "against" and isinstance(target, str):
+            depth_half = obj.dimensions_m[2] / 2 + 0.03
+            if "back" in target:
+                obj.transform.pos[2] = -room.depth_m / 2 + depth_half
+                obj.transform.rot_y_deg = 0.0
+            elif "left" in target:
+                obj.transform.pos[0] = -room.width_m / 2 + depth_half
+                obj.transform.rot_y_deg = 90.0
+            elif "right" in target:
+                obj.transform.pos[0] = room.width_m / 2 - depth_half
+                obj.transform.rot_y_deg = -90.0
+            return
+
+        if rtype == "under" and isinstance(target, str):
+            # Align under a back-wall feature (mirror, window, art)
+            for feature in room.features:
+                if feature.type == target and feature.wall == "back":
+                    obj.transform.pos[0] = self._clamp(
+                        feature.center_x_m,
+                        -room.width_m / 2 + obj.dimensions_m[0] / 2,
+                        room.width_m / 2 - obj.dimensions_m[0] / 2,
+                    )
+                    obj.transform.pos[2] = -room.depth_m / 2 + obj.dimensions_m[2] / 2 + 0.03
+                    obj.transform.rot_y_deg = 0.0
+                    return
+            return
+
+        # Remaining relations reference another object by detection index
+        try:
+            other = by_det_index.get(int(target))
+        except (TypeError, ValueError):
+            return
+        if other is None or other.id == obj.id:
+            return
+
+        if rtype == "beside":
+            side = 1.0 if (rel.get("side") or "right") == "right" else -1.0
+            obj.transform.pos[0] = self._clamp(
+                other.transform.pos[0] + side * (other.dimensions_m[0] / 2 + obj.dimensions_m[0] / 2 + 0.05),
+                -room.width_m / 2 + obj.dimensions_m[0] / 2,
+                room.width_m / 2 - obj.dimensions_m[0] / 2,
+            )
+            # Align back edges (nightstand back flush with the bed's head)
+            back_edge = other.transform.pos[2] - other.dimensions_m[2] / 2
+            obj.transform.pos[2] = self._clamp(
+                back_edge + obj.dimensions_m[2] / 2,
+                -room.depth_m / 2 + obj.dimensions_m[2] / 2,
+                room.depth_m / 2 - obj.dimensions_m[2] / 2,
+            )
+            linked.add(frozenset((obj.id, other.id)))
+        elif rtype == "on":
+            obj.transform.pos[0] = other.transform.pos[0]
+            obj.transform.pos[2] = other.transform.pos[2]
+            obj.transform.pos[1] = round(other.transform.pos[1] + other.dimensions_m[1], 3)
+            linked.add(frozenset((obj.id, other.id)))
+        elif rtype == "in_front_of":
+            obj.transform.pos[0] = other.transform.pos[0]
+            obj.transform.pos[2] = self._clamp(
+                other.transform.pos[2] + other.dimensions_m[2] / 2 + obj.dimensions_m[2] / 2 + 0.15,
+                -room.depth_m / 2 + obj.dimensions_m[2] / 2,
+                room.depth_m / 2 - obj.dimensions_m[2] / 2,
+            )
+            linked.add(frozenset((obj.id, other.id)))
+
+    def _resolve_overlaps(
+        self,
+        objects: List[SceneObject],
+        room: RoomShell,
+        linked: Optional[set] = None,
+        pinned: Optional[set] = None,
+    ) -> None:
+        """
+        Nudge overlapping footprints apart along x. Objects placed by photo
+        relations are pinned — only unpinned objects get moved, so the
+        constraint-solved arrangement survives.
+        """
+        linked = linked or set()
+        pinned = pinned or set()
         for _ in range(3):
             moved = False
             for i in range(len(objects)):
@@ -306,17 +556,28 @@ class SceneBuilder:
                     a, b = objects[i], objects[j]
                     if a.category == "rug" or b.category == "rug":
                         continue  # rugs live under other furniture
+                    if frozenset((a.id, b.id)) in linked:
+                        continue  # intentionally adjacent (beside/on relations)
+                    if a.transform.pos[1] > 0.01 or b.transform.pos[1] > 0.01:
+                        continue  # objects sitting on furniture never collide on the floor
+                    if a.id in pinned and b.id in pinned:
+                        continue  # both placed by the photo's relations — trust it
                     ax, az = a.transform.pos[0], a.transform.pos[2]
                     bx, bz = b.transform.pos[0], b.transform.pos[2]
                     half_w = (a.dimensions_m[0] + b.dimensions_m[0]) / 2
                     half_d = (a.dimensions_m[2] + b.dimensions_m[2]) / 2
                     dx, dz = bx - ax, bz - az
                     if abs(dx) < half_w and abs(dz) < half_d:
-                        push = (half_w - abs(dx)) / 2 + 0.05
+                        push = (half_w - abs(dx)) + 0.05
                         direction = 1.0 if dx >= 0 else -1.0
                         limit = room.width_m / 2 - 0.1
-                        a.transform.pos[0] = self._clamp(ax - direction * push, -limit, limit)
-                        b.transform.pos[0] = self._clamp(bx + direction * push, -limit, limit)
+                        if a.id in pinned:
+                            b.transform.pos[0] = self._clamp(bx + direction * push, -limit, limit)
+                        elif b.id in pinned:
+                            a.transform.pos[0] = self._clamp(ax - direction * push, -limit, limit)
+                        else:
+                            a.transform.pos[0] = self._clamp(ax - direction * push / 2, -limit, limit)
+                            b.transform.pos[0] = self._clamp(bx + direction * push / 2, -limit, limit)
                         moved = True
             if not moved:
                 break
@@ -371,12 +632,12 @@ class SceneBuilder:
                 ))
                 continue
 
-            # Which wall? Extreme left/right of the frame -> side walls,
+            # Which wall? Left/right edges of the frame -> side walls,
             # otherwise the back wall (the one facing the camera).
-            if cx_norm < 0.15:
+            if cx_norm < 0.20:
                 wall, wall_len = "left", room.depth_m
                 center_x = 0.0
-            elif cx_norm > 0.85:
+            elif cx_norm > 0.80:
                 wall, wall_len = "right", room.depth_m
                 center_x = 0.0
             else:
@@ -384,15 +645,34 @@ class SceneBuilder:
                 center_x = (cx_norm - 0.5) * room.width_m
 
             d = defaults[ftype]
+            style = (det.get("style") or "").strip().lower() or None
+            # Models return free-form styles ("double_layer_sheer_and_heavy");
+            # normalize to what the editor can render.
+            if style:
+                if ftype == "curtain":
+                    style = "sheer" if any(k in style for k in ("sheer", "voile", "translucent")) else "solid"
+                elif ftype == "window":
+                    if "floor" in style or "full" in style:
+                        style = "floor_to_ceiling"
+                    elif "slid" in style:
+                        style = "sliding_door"
+                    else:
+                        style = "standard"
             width = float(det.get("width_m") or ((x1 - x0) / img_w) * wall_len)
             width = self._clamp(width, 0.4, wall_len - 0.2)
-            height = self._clamp(float(det.get("height_m") or d["height_m"]), 0.4, room.height_m - 0.1)
-            bottom = self._clamp(float(det.get("bottom_m") or d["bottom_m"]), 0.0, room.height_m - height)
+            # Full-height glazing overrides the standard window defaults
+            if ftype == "window" and style in ("floor_to_ceiling", "sliding_door"):
+                height = room.height_m - 0.25
+                bottom = 0.02
+            else:
+                height = self._clamp(float(det.get("height_m") or d["height_m"]), 0.4, room.height_m - 0.1)
+                bottom = self._clamp(float(det.get("bottom_m") or d["bottom_m"]), 0.0, room.height_m - height)
             center_x = self._clamp(center_x, -wall_len / 2 + width / 2, wall_len / 2 - width / 2)
 
             features.append(WallFeature(
                 id=f"{ftype}_{uuid.uuid4().hex[:6]}",
                 type=ftype,
+                style=style,
                 wall=wall,
                 center_x_m=round(center_x, 3),
                 width_m=round(width, 3),
@@ -402,7 +682,18 @@ class SceneBuilder:
             ))
         return features
 
-    def _sample_texture(self, hires_photo, det_size, bbox, kind: str):
+    @staticmethod
+    def _bbox_overlap_ratio(a, b) -> float:
+        """How much of bbox a is covered by bbox b (0..1)."""
+        ax0, ay0, ax1, ay1 = a
+        bx0, by0, bx1, by1 = b
+        ix = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+        iy = max(0.0, min(ay1, by1) - max(ay0, by0))
+        area = max(1.0, (ax1 - ax0) * (ay1 - ay0))
+        return (ix * iy) / area
+
+    def _sample_texture(self, hires_photo, det_size, bbox, kind: str,
+                        obstacles=None, expected_color: Optional[str] = None):
         """
         Cut a clean wall/floor patch from the photo to use as the actual
         3D material texture — real materials instead of flat colors.
@@ -415,6 +706,16 @@ class SceneBuilder:
 
             x0, y0, x1, y1 = [float(v) for v in bbox]
             det_w, det_h = det_size
+
+            # Hard rule: the sample must not contain any detected object or
+            # feature — statistics can be fooled, geometry can't.
+            for obstacle in (obstacles or []):
+                try:
+                    if self._bbox_overlap_ratio((x0, y0, x1, y1), [float(v) for v in obstacle]) > 0.12:
+                        print(f"[SceneBuilder] {kind} sample overlaps an object — flat color instead")
+                        return None
+                except (TypeError, ValueError):
+                    continue
             sx, sy = hires_photo.width / det_w, hires_photo.height / det_h
             crop = hires_photo.crop((
                 int(max(0, x0 * sx)), int(max(0, y0 * sy)),
@@ -426,7 +727,45 @@ class SceneBuilder:
             # Cap texture size; keep it square-ish for clean tiling
             side = min(crop.width, crop.height, 512)
             crop = crop.resize((side, side))
-            return generation_service.save_texture(crop, kind)
+
+            # Flatten the lighting gradient (spotlights/shadows tile as
+            # ugly kaleidoscope patterns) by dividing out the low-frequency
+            # brightness, then reject patches that still look "busy" —
+            # they contain objects/edges, and a flat color is safer.
+            from PIL import ImageFilter
+
+            arr = np.asarray(crop.convert("RGB"), dtype=np.float32)
+            blurred = np.asarray(
+                crop.convert("RGB").filter(ImageFilter.GaussianBlur(radius=side / 4)),
+                dtype=np.float32,
+            )
+            mean_color = arr.mean(axis=(0, 1))
+            flat = arr / np.clip(blurred, 8.0, None) * mean_color
+            flat = np.clip(flat, 0, 255).astype(np.uint8)
+
+            busyness = float(flat.std(axis=(0, 1)).mean())
+            limit = 38.0 if kind == "floor" else 30.0
+            if busyness > limit:
+                print(f"[SceneBuilder] {kind} patch too busy (std {busyness:.0f} > {limit}) "
+                      f"— using flat color instead")
+                return None
+
+            # The patch should roughly match the detected surface color;
+            # a big mismatch means it sampled something else (shadow, object).
+            if expected_color:
+                try:
+                    hex_str = expected_color.lstrip("#")
+                    target = np.array([int(hex_str[i:i + 2], 16) for i in (0, 2, 4)], dtype=np.float32)
+                    distance = float(np.linalg.norm(mean_color - target))
+                    if distance > 110.0:
+                        print(f"[SceneBuilder] {kind} patch color off by {distance:.0f} "
+                              f"from detected color — flat color instead")
+                        return None
+                except ValueError:
+                    pass
+
+            from PIL import Image as PILImage
+            return generation_service.save_texture(PILImage.fromarray(flat), kind)
         except Exception as e:
             print(f"[SceneBuilder] Could not sample {kind} texture: {e}")
             return None
@@ -460,8 +799,15 @@ class SceneBuilder:
             print(f"[SceneBuilder] Depth estimation unavailable, using layout-only placement: {e}")
 
         detection = await self.detect_room(detection_base64, image_size)
+        # Understanding layer: second pass reviews the analysis against the photo
+        detection = await self.refine_detection(detection_base64, image_size, detection)
 
         hires = self._capped(original, 2048)
+
+        # Anything detected is an obstacle for material sampling: a texture
+        # patch containing furniture/curtains tiles as garbage.
+        obstacles = [o.get("bbox") for o in (detection.get("objects") or []) if o.get("bbox")]
+        obstacles += [f.get("bbox") for f in (detection.get("features") or []) if f.get("bbox")]
 
         est = detection.get("room_estimate") or {}
         room = RoomShell(
@@ -471,14 +817,16 @@ class SceneBuilder:
             wall_material=MaterialDef(
                 color=detection.get("wall_color") or "#F2EDE4",
                 texture_url=self._sample_texture(
-                    hires, image_size, detection.get("wall_sample_bbox"), "wall"
+                    hires, image_size, detection.get("wall_sample_bbox"), "wall",
+                    obstacles=obstacles, expected_color=detection.get("wall_color"),
                 ),
             ),
             floor_material=MaterialDef(
                 color=detection.get("floor_color") or "#A98B6D",
                 texture=detection.get("floor_type"),
                 texture_url=self._sample_texture(
-                    hires, image_size, detection.get("floor_sample_bbox"), "floor"
+                    hires, image_size, detection.get("floor_sample_bbox"), "floor",
+                    obstacles=obstacles, expected_color=detection.get("floor_color"),
                 ),
             ),
         )

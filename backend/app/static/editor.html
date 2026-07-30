@@ -344,14 +344,42 @@ function buildFeature(f, room) {
   const g = new THREE.Group();
   const wallThick = 0.05;
   if (f.type === 'window') {
-    const frame = box(f.width_m, f.height_m, wallThick, '#F2F2EE');
-    const pane = box(f.width_m * 0.92, f.height_m * 0.88, 0.02, f.color);
-    pane.material.roughness = 0.2;
-    pane.material.emissive = new THREE.Color(f.color).multiplyScalar(0.55);
-    pane.position.z = 0.02;
-    const barV = box(0.03, f.height_m * 0.88, 0.03, '#F2F2EE'); barV.position.z = 0.035;
-    const barH = box(f.width_m * 0.92, 0.03, 0.03, '#F2F2EE'); barH.position.z = 0.035;
-    g.add(frame, pane, barV, barH);
+    if (f.style === 'floor_to_ceiling' || f.style === 'sliding_door') {
+      // Full-height glazing: slim frame + vertical glass panels
+      const frame = box(f.width_m, f.height_m, 0.03, '#3A3C3E');
+      const nPanels = Math.max(2, Math.round(f.width_m / 0.8));
+      const pw = (f.width_m * 0.96) / nPanels;
+      for (let i = 0; i < nPanels; i++) {
+        const pane = box(pw * 0.96, f.height_m * 0.94, 0.02, f.color);
+        pane.material.roughness = 0.12;
+        pane.material.emissive = new THREE.Color('#F4F1E8').multiplyScalar(0.5);
+        pane.position.set(-f.width_m * 0.48 + pw * (i + 0.5), 0, 0.02);
+        g.add(pane);
+        if (i > 0) {
+          const mullion = box(0.025, f.height_m * 0.94, 0.04, '#3A3C3E');
+          mullion.position.set(-f.width_m * 0.48 + pw * i, 0, 0.03);
+          g.add(mullion);
+        }
+      }
+      if (f.style === 'sliding_door') {
+        const rail = box(f.width_m, 0.05, 0.05, '#2E3032');
+        rail.position.y = f.height_m / 2 - 0.025;
+        const railB = rail.clone(); railB.position.y = -f.height_m / 2 + 0.025;
+        const handle = box(0.02, 0.25, 0.03, '#B8BCC0');
+        handle.position.set(f.width_m * 0.22, 0, 0.045);
+        g.add(rail, railB, handle);
+      }
+      g.add(frame);
+    } else {
+      const frame = box(f.width_m, f.height_m, wallThick, '#F2F2EE');
+      const pane = box(f.width_m * 0.92, f.height_m * 0.88, 0.02, f.color);
+      pane.material.roughness = 0.2;
+      pane.material.emissive = new THREE.Color(f.color).multiplyScalar(0.55);
+      pane.position.z = 0.02;
+      const barV = box(0.03, f.height_m * 0.88, 0.03, '#F2F2EE'); barV.position.z = 0.035;
+      const barH = box(f.width_m * 0.92, 0.03, 0.03, '#F2F2EE'); barH.position.z = 0.035;
+      g.add(frame, pane, barV, barH);
+    }
   } else if (f.type === 'door') {
     const slab = box(f.width_m, f.height_m, wallThick, f.color);
     const knob = new THREE.Mesh(new THREE.SphereGeometry(0.03, 12, 10), mat('#B8A97C', { metalness: 0.7, roughness: 0.3 }));
@@ -403,18 +431,25 @@ function buildFeature(f, room) {
       mat('#FFF6E0', { extra: { emissive: new THREE.Color('#FFE9B8').multiplyScalar(0.9) } }));
     bulb.position.y = -drop * 0.25;
     g.add(cord, shadeM, bulb);
-  } else { // curtain: vertical slats faking folds
+  } else { // curtain: vertical slats faking folds; sheer = translucent voile
+    const sheer = f.style === 'sheer';
     const n = Math.max(4, Math.round(f.width_m * 5));
     const slatW = f.width_m / n;
     for (let i = 0; i < n; i++) {
-      const slat = box(slatW * 0.96, f.height_m, 0.03, i % 2 ? f.color : shade(f.color, 0.86));
+      const slat = box(slatW * 0.96, f.height_m, 0.03, i % 2 ? f.color : shade(f.color, sheer ? 0.94 : 0.86));
+      if (sheer) {
+        slat.material.transparent = true;
+        slat.material.opacity = 0.4;
+        slat.material.roughness = 0.6;
+      }
       slat.position.set(-f.width_m / 2 + slatW * (i + 0.5), 0, (i % 2) * 0.03);
       g.add(slat);
     }
   }
 
   const y = f.bottom_m + f.height_m / 2;
-  const inset = 0.04;
+  // Curtains hang IN FRONT of windows on the same wall, not inside them
+  const inset = f.type === 'curtain' ? 0.14 : 0.04;
   const w = room.width_m, d = room.depth_m;
   if (f.wall === 'ceiling') {
     g.position.set(f.center_x_m, room.height_m - f.height_m * 0.2 - 0.02, f.center_z_m || 0);
@@ -441,7 +476,9 @@ const texLoader = new THREE.TextureLoader();
 function photoTexture(url, repeatX, repeatY) {
   const src = url.startsWith('http') ? url : location.origin + url;
   const tex = texLoader.load(src);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  // Mirrored repeat hides the seams/banding that plain tiling produces
+  // on photo-sampled patches with lighting gradients.
+  tex.wrapS = tex.wrapT = THREE.MirroredRepeatWrapping;
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.repeat.set(repeatX, repeatY);
   return tex;
@@ -935,7 +972,9 @@ function onPointerUp(e) {
     const group = objectGroups.get(selected.id);
     const obj = sceneData.objects.find(o => o.id === selected.id);
     if (group && obj) {
-      obj.transform.pos = [round3(group.position.x), 0, round3(group.position.z)];
+      // Preserve height: objects sitting on furniture stay at their level
+      const y = obj.transform.pos[1] || 0;
+      obj.transform.pos = [round3(group.position.x), y, round3(group.position.z)];
       emitOp({ op: 'move', target: selected.id, value: { pos: obj.transform.pos } });
     }
     return;

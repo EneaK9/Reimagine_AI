@@ -31,7 +31,8 @@ class WallFeature(BaseModel):
     center_z_m: used only for ceiling features (pendants): z position in the room.
     """
     id: str
-    type: str  # window | door | curtain | art | pendant
+    type: str  # window | door | curtain | art | pendant | mirror
+    style: Optional[str] = None  # window: standard|floor_to_ceiling|sliding_door; curtain: solid|sheer
     wall: str = "back"
     center_x_m: float = 0.0
     center_z_m: float = 0.0

@@ -830,16 +830,22 @@ class _WebHeroActionState extends State<_WebHeroAction> {
               const Spacer(),
               Text(
                 widget.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.interTight(
                   fontSize: 15,
+                  height: 1.15,
                   fontWeight: FontWeight.w700,
                   color: fg,
                 ),
               ),
               Text(
                 widget.subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.interTight(
                   fontSize: 12,
+                  height: 1.15,
                   color: widget.filled
                       ? Colors.white.withValues(alpha: 0.85)
                       : AppTheme.textMuted,

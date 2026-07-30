@@ -132,6 +132,40 @@ class GenerationService:
             )
         return image
 
+    def _gemini_isolate(self, image: Image.Image, label: str) -> Optional[Image.Image]:
+        """
+        Last-resort isolation: ask Gemini's image model to redraw the object
+        alone on a white background — handles occlusion and dark-on-dark
+        cases where segmentation fails, so the object can still be generated.
+        """
+        try:
+            from google.genai import types
+
+            from .gemini_service import gemini_service
+
+            if not gemini_service.client:
+                return None
+
+            buf = BytesIO()
+            image.convert("RGB").save(buf, "JPEG", quality=90)
+            prompt = (
+                f"Extract the {label} from this photo. Output an image showing ONLY "
+                f"the {label}, complete and fully visible, centered on a pure white "
+                f"background. Keep its exact shape, colors, materials and proportions. "
+                f"Complete any parts that are hidden behind other objects."
+            )
+            response = gemini_service.client.models.generate_content(
+                model=settings.gemini_model,
+                contents=[prompt, types.Part.from_bytes(data=buf.getvalue(), mime_type="image/jpeg")],
+                config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
+            )
+            for part in response.candidates[0].content.parts:
+                if part.inline_data is not None:
+                    return Image.open(BytesIO(part.inline_data.data)).convert("RGB")
+        except Exception as e:
+            print(f"[Gen3D] Gemini isolation failed for '{label}': {e}")
+        return None
+
     async def image_to_glb(self, image: Image.Image, label: str = "") -> Optional[str]:
         """
         Generate a textured GLB from a furniture crop.
@@ -149,7 +183,12 @@ class GenerationService:
         # Background removal is CPU-bound; keep it off the event loop
         cut = await asyncio.to_thread(self._remove_background, prepared, label)
         if cut is None:
-            return None
+            # Segmentation failed (occluded / dark-on-dark): have Gemini
+            # redraw the object clean on white, then generate from that.
+            cut = await asyncio.to_thread(self._gemini_isolate, prepared, label)
+            if cut is None:
+                return None
+            print(f"[Gen3D] Used Gemini isolation for '{label}'")
 
         buf = BytesIO()
         if cut.mode == "RGBA":

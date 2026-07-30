@@ -35,8 +35,11 @@ class Settings(BaseSettings):
     # Google Gemini Settings (for room redesign - image editing)
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3-pro-image-preview"  # Supports image generation
-    # Text/vision model used for furniture detection when building 3D scenes
-    # ("-latest" alias survives model retirements)
+    # Scene understanding layer: which vision provider reads the photo
+    # ("openai" or "gemini"; the other is used as automatic fallback)
+    scene_analysis_provider: str = "openai"
+    openai_vision_model: str = "gpt-5-mini"
+    # Gemini analysis model ("-latest" alias survives model retirements)
     gemini_analysis_model: str = "gemini-flash-latest"
 
     # Image-to-3D generation (per-object realistic meshes via fal.ai)
