@@ -219,11 +219,15 @@ async def enhance_scene(
             detail="Original photo not available for this scene (regenerate the room first).",
         )
 
-    # Only objects detected from the photo (with a bbox) can be generated
+    # Only objects detected from the photo (with a bbox) can be generated.
+    # Flat/reflective items (rugs, mirrors) produce useless 3D meshes —
+    # their procedural versions look better.
+    SKIP_CATEGORIES = {"rug", "mirror"}
     candidates = [
         obj for obj in scene.data.objects
         if obj.asset.type == "catalog"
         and obj.source and obj.source.get("bbox")
+        and obj.category not in SKIP_CATEGORIES
     ]
     if not candidates:
         raise HTTPException(status_code=400, detail="No photo-detected objects to enhance.")

@@ -245,7 +245,7 @@ class GenerationService:
             return f"/api/v1/scenes/assets/{filename}"
 
         except Exception as e:
-            print(f"[Gen3D] Generation failed for '{label}': {e}")
+            print(f"[Gen3D] Generation failed for '{label}': {e!r}")
             return None
 
 

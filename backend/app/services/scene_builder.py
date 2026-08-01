@@ -479,8 +479,10 @@ Return ONLY the corrected JSON, same schema, no commentary."""
             else:
                 wall, gap = "back", (z - half_d) - (-room.depth_m / 2)
             # Depth estimation is noisy; for wall-hugging furniture trust the
-            # prior generously (only skip when truly mid-room or already flush)
-            if gap < 0 or gap > max(1.3, room.depth_m * 0.35):
+            # prior generously. Beds/wardrobes etc. are essentially NEVER
+            # free-standing — snap them regardless of the estimated gap.
+            always_snap = obj.category in ("bed", "wardrobe", "fridge", "bathtub", "toilet")
+            if gap < 0 or (not always_snap and gap > max(1.3, room.depth_m * 0.35)):
                 continue
             if wall == "back":
                 obj.transform.pos[2] = -room.depth_m / 2 + half_d + 0.03
@@ -549,9 +551,17 @@ Return ONLY the corrected JSON, same schema, no commentary."""
             )
             linked.add(frozenset((obj.id, other.id)))
         elif rtype == "on":
+            # Only small objects sit on furniture (lamp on nightstand, TV on
+            # stand) — a wardrobe can't be "on" another wardrobe, and nothing
+            # stacks above head height.
+            if obj.dimensions_m[0] > 0.9 or obj.dimensions_m[1] > 1.0:
+                return
+            top_y = other.transform.pos[1] + other.dimensions_m[1]
+            if top_y + obj.dimensions_m[1] > room.height_m - 0.2:
+                return
             obj.transform.pos[0] = other.transform.pos[0]
             obj.transform.pos[2] = other.transform.pos[2]
-            obj.transform.pos[1] = round(other.transform.pos[1] + other.dimensions_m[1], 3)
+            obj.transform.pos[1] = round(top_y, 3)
             linked.add(frozenset((obj.id, other.id)))
         elif rtype == "in_front_of":
             obj.transform.pos[0] = other.transform.pos[0]

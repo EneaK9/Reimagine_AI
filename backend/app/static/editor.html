@@ -809,7 +809,10 @@ function buildObject(obj) {
       const targetSpan = Math.max(dims[0], dims[2]);
       const meshSpan = Math.max(size.x, size.z);
       let s = targetSpan / meshSpan;
-      if (size.y * s > dims[1] * 1.8) s = (dims[1] * 1.8) / size.y;
+      // Height cap protects against wrongly-proportioned meshes, but flat
+      // catalog dims (rugs: 2cm) must not crush the model — floor at 0.4m.
+      const capHeight = Math.max(dims[1], 0.4) * 1.8;
+      if (size.y * s > capHeight) s = capHeight / size.y;
       model.scale.setScalar(s);
       const bb2 = new THREE.Box3().setFromObject(model);
       const center = bb2.getCenter(new THREE.Vector3());
