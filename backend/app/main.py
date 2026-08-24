@@ -106,6 +106,16 @@ async def editor_page():
     return FileResponse(path, media_type="text/html")
 
 
+@app.get("/privacy", tags=["Legal"])
+async def privacy_policy_page():
+    """Public Privacy Policy page (required for Google Play / store listings)."""
+    import os
+    from fastapi.responses import FileResponse
+
+    path = os.path.join(os.path.dirname(__file__), "static", "privacy.html")
+    return FileResponse(path, media_type="text/html")
+
+
 # ============ Root Endpoints ============
 
 @app.get("/", tags=["Root"])
