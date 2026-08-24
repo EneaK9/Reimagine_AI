@@ -1,6 +1,9 @@
 # Production-oriented stack for Hetzner / VPS
 # Usage (on server, from repo root):
 #   docker compose up -d --build
+#
+# Public HTTPS: https://62.238.120.111.sslip.io
+# (Caddy terminates TLS; API stays private on the Docker network)
 
 services:
   db:
@@ -18,7 +21,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-    # Do not publish 5432 to the public internet
     expose:
       - "5432"
 
@@ -28,8 +30,9 @@ services:
       dockerfile: Dockerfile
     container_name: reimagine-api
     restart: unless-stopped
-    ports:
-      - "8100:8100"
+    # Not published publicly — reach via Caddy on 443
+    expose:
+      - "8100"
     env_file:
       - ./backend/.env
     environment:
@@ -42,9 +45,33 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8100/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: reimagine-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   reimagine_pgdata:
   app_meshes:
   app_generated:
   app_scene_images:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,20 @@
+# HTTPS via Let's Encrypt for the Hetzner API.
+# Hostname uses sslip.io so no custom domain is required yet.
+# https://62.238.120.111.sslip.io  →  api:8100
+
+{
+	email eneak9@users.noreply.github.com
+}
+
+62.238.120.111.sslip.io {
+	encode gzip
+
+	# Scene generate / enhance can run for several minutes
+	reverse_proxy api:8100 {
+		transport http {
+			read_timeout 30m
+			write_timeout 30m
+			dial_timeout 30s
+		}
+	}
+}
