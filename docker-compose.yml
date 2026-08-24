@@ -1,3 +1,7 @@
+# Production-oriented stack for Hetzner / VPS
+# Usage (on server, from repo root):
+#   docker compose up -d --build
+
 services:
   db:
     image: postgres:16-alpine
@@ -5,10 +9,8 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: reimagine
-      POSTGRES_PASSWORD: reimagine
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-reimagine}
       POSTGRES_DB: reimagine_ai
-    ports:
-      - "5432:5432"
     volumes:
       - reimagine_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -16,6 +18,33 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    # Do not publish 5432 to the public internet
+    expose:
+      - "5432"
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: reimagine-api
+    restart: unless-stopped
+    ports:
+      - "8100:8100"
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://reimagine:${POSTGRES_PASSWORD:-reimagine}@db:5432/reimagine_ai
+      DEBUG: "false"
+    volumes:
+      - app_meshes:/app/data/meshes
+      - app_generated:/app/data/generated
+      - app_scene_images:/app/data/scene_images
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   reimagine_pgdata:
+  app_meshes:
+  app_generated:
+  app_scene_images:

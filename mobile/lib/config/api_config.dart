@@ -1,7 +1,12 @@
 /// API Configuration for ReimagineAI
 class ApiConfig {
-  // Your computer's IP - change this if your IP changes
-  static const String baseUrl = 'http://127.0.0.1:8100';
+  /// Override at build time, e.g.:
+  /// `flutter build web --dart-define=API_BASE_URL=https://api.example.com`
+  /// `flutter build appbundle --dart-define=API_BASE_URL=http://62.238.120.111:8100`
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'http://127.0.0.1:8100',
+  );
   
   static const String apiVersion = '/api/v1';
   
