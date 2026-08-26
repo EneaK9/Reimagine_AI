@@ -110,20 +110,22 @@ async def editor_page():
 async def privacy_policy_page():
     """Public Privacy Policy page (required for Google Play / store listings)."""
     import os
-    from fastapi.responses import FileResponse
+    from fastapi.responses import HTMLResponse
 
     path = os.path.join(os.path.dirname(__file__), "static", "privacy.html")
-    return FileResponse(path, media_type="text/html")
+    with open(path, encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
 
 
 @app.get("/delete-account", tags=["Legal"])
 async def delete_account_page():
     """Public account-deletion request page (required for Google Play Data safety)."""
     import os
-    from fastapi.responses import FileResponse
+    from fastapi.responses import HTMLResponse
 
     path = os.path.join(os.path.dirname(__file__), "static", "delete-account.html")
-    return FileResponse(path, media_type="text/html")
+    with open(path, encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
 
 
 # ============ Root Endpoints ============
