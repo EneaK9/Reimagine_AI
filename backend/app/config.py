@@ -4,8 +4,17 @@ ReimagineAI - Configuration Settings
 API keys and secrets must come from environment variables or a local `.env`
 file (see `.env.example`). Never hardcode real credentials in this module.
 """
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+# OpenAI shut down these preview snapshots (gpt-4-turbo-preview on 2026-03-26).
+# Remap so a stale GPT_MODEL in production .env still works after deploy.
+_RETIRED_GPT_MODELS = {
+    "gpt-4-turbo-preview": "gpt-4.1",
+    "gpt-4-0125-preview": "gpt-4.1",
+    "gpt-4-1106-preview": "gpt-4.1",
+}
 
 
 class Settings(BaseSettings):
@@ -32,8 +41,9 @@ class Settings(BaseSettings):
     allowed_extensions: list = ["jpg", "jpeg", "png", "webp"]
     upload_dir: str = "uploads"
 
-    # OpenAI Settings (for chat)
-    gpt_model: str = "gpt-4-turbo-preview"
+    # OpenAI Settings (for chat + optional vision). gpt-4.1 is the documented
+    # replacement for the retired gpt-4-turbo-preview snapshot.
+    gpt_model: str = "gpt-4.1"
 
     # Google Gemini Settings (for room redesign - image editing)
     gemini_api_key: str = ""
@@ -55,6 +65,17 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         extra = "ignore"  # Ignore extra fields in .env file
+
+    @model_validator(mode="after")
+    def remap_retired_openai_models(self):
+        replacement = _RETIRED_GPT_MODELS.get(self.gpt_model.strip())
+        if replacement:
+            print(
+                f"[WARNING] GPT_MODEL '{self.gpt_model}' was retired by OpenAI; "
+                f"using '{replacement}' instead"
+            )
+            self.gpt_model = replacement
+        return self
 
 
 @lru_cache()
