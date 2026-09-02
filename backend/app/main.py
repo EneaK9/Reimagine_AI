@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
         print("[WARNING] OpenAI API key not set! Set OPENAI_API_KEY in .env")
     else:
         print("[OK] OpenAI API key configured")
-    print(f"[INFO] Chat model: {settings.gpt_model}")
+    print(f"[INFO] OpenAI model: {settings.gpt_model}")
     
     yield
     
