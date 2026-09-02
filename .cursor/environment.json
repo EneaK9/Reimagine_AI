@@ -1,0 +1,15 @@
+{
+  "name": "ReimagineAI",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "backend",
+      "description": "ReimagineAI FastAPI server (auto-reload) on http://localhost:8100 — Swagger at /docs.",
+      "command": "cd backend && export HF_HUB_VERBOSITY=error && ./venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8100 --reload --reload-dir app"
+    }
+  ],
+  "ports": [
+    { "name": "backend-api", "port": 8100 }
+  ]
+}
