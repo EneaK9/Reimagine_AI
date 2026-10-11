@@ -1,17 +1,26 @@
 """
 ReimagineAI - Scene Builder
 
-Turns a single room photo into a structured, editable 3D scene:
-1. Detect furniture + room info with Gemini (OpenAI vision fallback)
-2. Estimate depth (reuses depth_service) to place objects in the room
-3. Match each item to a procedural catalog asset
-4. Assemble a SceneData document (room shell + per-object entries)
+Turns a single room photo into a structured, editable 3D scene that lines
+up with the photo:
 
-The result is intentionally a *good starting layout*, not a perfect
-reconstruction — the mobile editor is where users fine-tune positions.
+1. The vision model (OpenAI / Gemini) reads the photo: furniture with boxes,
+   which way each piece faces, wall features, materials, relations.
+2. MoGe-2 metric depth + room_geometry *measure* the room: the camera pose,
+   floor/walls/ceiling, and each object's real position, size and heading.
+3. Every object gets a catalog asset (shape picked from its label), sized to
+   its measurement; windows/doors land on the wall their rays hit; colors
+   and the floor texture come from the photo's own pixels.
+4. The photo's camera is stored with the scene, so the editor opens at the
+   exact photo viewpoint and can project the photo onto the room shell.
+
+If the geometry can't be recovered (no floor visible, model unavailable),
+placement falls back to the vision model's own floor-plan estimate.
 """
 from __future__ import annotations
 
+import asyncio
+import copy
 import json
 import re
 import uuid
@@ -23,18 +32,41 @@ from ..config import get_settings
 from ..models.scene import (
     AssetRef,
     MaterialDef,
+    PhotoProjection,
     RoomShell,
+    SceneCamera,
     SceneData,
     SceneObject,
     Transform,
     WallFeature,
 )
+from . import room_geometry
 from .catalog_service import catalog_service
 from .depth_service import depth_service
 from .gemini_service import gemini_service
 from .openai_service import openai_service
+from .semantic_service import semantic_service
 
 settings = get_settings()
+
+# How each provider reports boxes. Gemini is trained on box_2d
+# [y_min, x_min, y_max, x_max] normalized to 0-1000 — asking for anything
+# else costs accuracy; OpenAI gets pixel boxes with the image size.
+BOX_FORMATS = {
+    "gemini": {
+        "key": "box_2d",
+        "order": "[y_min, x_min, y_max, x_max]",
+        "rule": "box_2d values are normalized to 0-1000 (0 = top/left edge of the image, "
+                "1000 = bottom/right edge), in the order [y_min, x_min, y_max, x_max]. "
+                "Boxes must tightly enclose the whole visible object.",
+    },
+    "openai": {
+        "key": "bbox",
+        "order": "[x_min, y_min, x_max, y_max]",
+        "rule": "bbox is in pixel coordinates of THIS image (integers), in the order "
+                "[x_min, y_min, x_max, y_max]. Boxes must tightly enclose the whole visible object.",
+    },
+}
 
 DETECTION_PROMPT = """You are an interior-design vision system. Analyze this room photo.
 
@@ -46,16 +78,17 @@ Return ONLY valid JSON (no markdown fences) with this exact structure:
   "wall_color": "#EDE8DF",
   "floor_color": "#A98B6D",
   "floor_type": "wood",
-  "wall_sample_bbox": [x_min, y_min, x_max, y_max],
-  "floor_sample_bbox": [x_min, y_min, x_max, y_max],
+  "wall_sample_<<BOX>>": <<ORDER>>,
+  "floor_sample_<<BOX>>": <<ORDER>>,
   "objects": [
     {
       "label": "grey fabric sofa",
       "category": "sofa",
-      "bbox": [x_min, y_min, x_max, y_max],
+      "<<BOX>>": <<ORDER>>,
       "color": "#8A8A8A",
       "width_m": 2.0,
       "against_wall": true,
+      "facing": "camera",
       "plan_pos": {"x_m": 0.4, "z_m": -1.2, "rot_y_deg": 0},
       "relations": [
         {"type": "against", "target": "back_wall"},
@@ -67,19 +100,19 @@ Return ONLY valid JSON (no markdown fences) with this exact structure:
     }
   ],
   "features": [
-    {"type": "window", "style": "floor_to_ceiling", "bbox": [x_min, y_min, x_max, y_max], "color": "#FFFFFF", "width_m": 1.5},
-    {"type": "curtain", "style": "sheer", "bbox": [x_min, y_min, x_max, y_max], "color": "#8A8A8A", "width_m": 1.5},
-    {"type": "door", "bbox": [x_min, y_min, x_max, y_max], "color": "#F0F0F0", "width_m": 0.9},
-    {"type": "art", "bbox": [x_min, y_min, x_max, y_max], "color": "#D8D2C4", "width_m": 0.5},
-    {"type": "pendant", "bbox": [x_min, y_min, x_max, y_max], "color": "#E8E4DA", "width_m": 0.35},
-    {"type": "mirror", "bbox": [x_min, y_min, x_max, y_max], "color": "#C3D3DC", "width_m": 0.6}
+    {"type": "window", "style": "floor_to_ceiling", "<<BOX>>": <<ORDER>>, "color": "#FFFFFF", "width_m": 1.5},
+    {"type": "curtain", "style": "sheer", "<<BOX>>": <<ORDER>>, "color": "#8A8A8A", "width_m": 1.5},
+    {"type": "door", "<<BOX>>": <<ORDER>>, "color": "#F0F0F0", "width_m": 0.9},
+    {"type": "art", "<<BOX>>": <<ORDER>>, "color": "#D8D2C4", "width_m": 0.5},
+    {"type": "pendant", "<<BOX>>": <<ORDER>>, "color": "#E8E4DA", "width_m": 0.35},
+    {"type": "mirror", "<<BOX>>": <<ORDER>>, "color": "#C3D3DC", "width_m": 0.6}
   ]
 }
 
 Rules:
-- bbox is in pixel coordinates of THIS image (integers).
+- <<BOX_RULE>>
 - category must be a simple generic furniture type: sofa, armchair, chair, table,
-  coffee_table, desk, bed, nightstand, wardrobe, dresser, bookshelf, tv, tv_stand,
+  coffee_table, side_table, desk, bed, nightstand, wardrobe, dresser, bookshelf, tv, tv_stand,
   lamp_floor, lamp_table, rug, plant, mirror, ottoman, sideboard, console, bench,
   stool, fridge, stove, kitchen_cabinet, kitchen_island, sink, toilet, bathtub,
   shower, washing_machine. Works for ANY room: kitchen, bathroom, office, hallway.
@@ -94,6 +127,11 @@ Rules:
   chandeliers, radiators, wall shelves, pillows, blankets — anything attached
   to a wall or ceiling belongs in "features" or nowhere.
 - width_m is your best real-world width estimate in meters.
+- facing: which way the object's FRONT points in the photo, from the viewer's
+  point of view: "camera" (toward the viewer), "away", "left" or "right".
+  The front of a sofa/chair is where you sit, of a bed the foot end, of a
+  wardrobe/dresser/nightstand the doors or drawers, of a TV the screen.
+  Items without a clear front (round tables, plants, rugs, lamps): "camera".
 - relations describe HOW objects are positioned relative to each other —
   this is what makes the 3D layout match the photo. Use them generously:
   * {"type": "against", "target": "back_wall"|"left_wall"|"right_wall"} —
@@ -120,13 +158,13 @@ Rules:
 - Max 20 objects.
 - Ignore tiny decor (books, cups, vases).
 - colors are hex approximations of the item's dominant color.
-- wall_sample_bbox: a rectangular patch showing ONLY bare wall (no furniture,
+- wall_sample_<<BOX>>: a rectangular patch showing ONLY bare wall (no furniture,
   no art, no windows, no strong shadows) — used to sample the wall material.
-- floor_sample_bbox: a rectangular patch showing ONLY bare floor — used to
+- floor_sample_<<BOX>>: a rectangular patch showing ONLY bare floor — used to
   sample the floor material. Pick the cleanest, most evenly lit areas.
 - features: windows, doors, curtains, framed wall art / picture groups
   ("art"), hanging ceiling lights ("pendant"), and WALL-MOUNTED mirrors
-  ("mirror") go in "features" with their bboxes and dominant colors.
+  ("mirror") go in "features" with their boxes and dominant colors.
 - windows have a "style": "standard" (normal window), "floor_to_ceiling"
   (glass from floor to ceiling), or "sliding_door" (glass door to balcony/
   garden). curtains have "style": "sheer" (translucent voile) or "solid".
@@ -151,6 +189,7 @@ def _strip_json(text: str) -> str:
 class SceneBuilder:
     def __init__(self):
         self._working_gemini_model: str | None = None
+        self._depth_slot = asyncio.Semaphore(1)  # one geometry inference at a time
 
     # ---------- provider-agnostic vision analysis ----------
 
@@ -215,23 +254,26 @@ class SceneBuilder:
             raise last_error
         return None
 
-    async def _ask_json(self, prompt: str, image_base64: str) -> Dict[str, Any]:
+    async def _ask_json(
+        self, prompts: Dict[str, str], image_base64: str, prefer: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Run a vision->JSON query on the configured provider, falling back
         to the other one. The provider order comes from settings
-        (scene_analysis_provider: "openai" | "gemini").
+        (scene_analysis_provider: "openai" | "gemini") unless `prefer`
+        overrides it; each provider gets its own prompt (box formats differ).
         """
-        order = (
-            ["openai", "gemini"]
-            if settings.scene_analysis_provider.lower() == "openai"
-            else ["gemini", "openai"]
-        )
+        first = prefer or settings.scene_analysis_provider.lower()
+        order = ["openai", "gemini"] if first == "openai" else ["gemini", "openai"]
         last_error: Optional[Exception] = None
         for provider in order:
             try:
                 if provider == "openai":
-                    return await self._openai_json(prompt, image_base64)
-                result = self._gemini_json(prompt, image_base64)
+                    if not settings.openai_api_key:
+                        continue
+                    return await self._openai_json(prompts["openai"], image_base64)
+                # The Gemini SDK call is synchronous: keep it off the event loop
+                result = await asyncio.to_thread(self._gemini_json, prompts["gemini"], image_base64)
                 if result is not None:
                     return result
             except Exception as e:
@@ -239,11 +281,19 @@ class SceneBuilder:
                 print(f"[SceneBuilder] {provider} analysis failed, trying next provider: {e}")
         raise RuntimeError(f"Room analysis failed on all providers: {last_error}")
 
+    @staticmethod
+    def _fill_prompt(template: str, provider: str, image_size: Tuple[int, int]) -> str:
+        fmt = BOX_FORMATS[provider]
+        text = (template.replace("<<BOX_RULE>>", fmt["rule"])
+                .replace("<<BOX>>", fmt["key"]).replace("<<ORDER>>", fmt["order"]))
+        if provider == "openai":
+            text += f"\nThe image is {image_size[0]}x{image_size[1]} pixels."
+        return text
+
     async def detect_room(self, image_base64: str, image_size: Tuple[int, int]) -> Dict[str, Any]:
         """Run furniture/room detection on the configured vision provider."""
-        width, height = image_size
-        prompt = DETECTION_PROMPT + f"\nThe image is {width}x{height} pixels."
-        return await self._ask_json(prompt, image_base64)
+        prompts = {p: self._fill_prompt(DETECTION_PROMPT, p, image_size) for p in BOX_FORMATS}
+        return self._canonicalize(await self._ask_json(prompts, image_base64), image_size)
 
     async def refine_detection(
         self,
@@ -256,35 +306,46 @@ class SceneBuilder:
         analysis in hand. Catches missed objects, wrong window styles,
         wrong walls, and bad size estimates. Falls back to the first pass.
         """
-        width, height = image_size
-        prompt = f"""You are reviewing a room analysis for a 3D reconstruction.
+        template = """You are reviewing a room analysis for a 3D reconstruction.
 
-Here is the photo ({width}x{height} px) and a first-pass analysis of it:
+Here is the photo and a first-pass analysis of it:
 
-{json.dumps(first_pass, indent=1)}
+<<ANALYSIS>>
 
 Carefully compare the analysis against the photo and return the CORRECTED
 full JSON in the exact same schema. Check specifically:
 1. MISSED furniture: nightstands, lamps, plants, stools, side tables —
-   anything on the floor that is not yet in "objects". Add them with bboxes.
-2. Window style: is it really "standard", or is it floor_to_ceiling glazing
+   anything on the floor that is not yet in "objects". Add them with boxes.
+2. Boxes: every box must tightly enclose its whole object. <<BOX_RULE>>
+3. facing: is each object's front direction right ("camera", "away",
+   "left", "right" from the viewer's point of view)?
+4. Window style: is it really "standard", or is it floor_to_ceiling glazing
    or a sliding door? Are curtains sheer or solid? Fix "style" fields.
-3. Wrong entries: remove objects that are actually part of another object
+5. Wrong entries: remove objects that are actually part of another object
    (pillows on a bed) or that do not exist in the photo.
-4. Sizes: fix clearly wrong width_m estimates (a bed is ~1.4-2.0m wide,
+6. Sizes: fix clearly wrong width_m estimates (a bed is ~1.4-2.0m wide,
    a nightstand ~0.4-0.6m).
-5. room_estimate, wall/floor colors and sample bboxes: adjust if wrong.
-6. plan_pos: mentally draw the top-down floor plan and verify each object's
+7. room_estimate, wall/floor colors and sample boxes: adjust if wrong.
+8. plan_pos: mentally draw the top-down floor plan and verify each object's
    x_m/z_m matches where it stands in the photo (origin = room center,
    back wall at z=-depth/2). Fix any object that would end up on the wrong
    side of the room or overlapping another object's footprint.
 
 Return ONLY the corrected JSON, same schema, no commentary."""
 
+        prompts = {}
+        for provider in BOX_FORMATS:
+            analysis = json.dumps(self._render_boxes(first_pass, provider, image_size), indent=1)
+            prompts[provider] = self._fill_prompt(template.replace("<<ANALYSIS>>", analysis), provider, image_size)
         try:
-            refined = await self._ask_json(prompt, image_base64)
+            # Gemini is trained for box grounding: when it is available it does
+            # the review pass, so every box gets its precise native box_2d.
+            refined = await self._ask_json(
+                prompts, image_base64, prefer="gemini" if gemini_service.client else None
+            )
             # Sanity: a valid refinement must keep the core keys
             if isinstance(refined, dict) and "objects" in refined:
+                refined = self._canonicalize(refined, image_size)
                 n_before = len(first_pass.get("objects") or [])
                 n_after = len(refined.get("objects") or [])
                 print(f"[SceneBuilder] Refinement pass: {n_before} -> {n_after} objects")
@@ -292,6 +353,120 @@ Return ONLY the corrected JSON, same schema, no commentary."""
         except Exception as e:
             print(f"[SceneBuilder] Refinement pass failed (using first pass): {e}")
         return first_pass
+
+    # ---------- box formats ----------
+
+    @staticmethod
+    def _px_box(item: Dict[str, Any], key_2d: str, key_px: str, size: Tuple[int, int]) -> Optional[List[float]]:
+        """Pixel [x0, y0, x1, y1] from a Gemini box_2d or an OpenAI pixel bbox."""
+        w, h = size
+        try:
+            if item.get(key_2d) is not None:
+                y0, x0, y1, x1 = [float(v) for v in item[key_2d]]
+                box = [x0 / 1000.0 * w, y0 / 1000.0 * h, x1 / 1000.0 * w, y1 / 1000.0 * h]
+            elif item.get(key_px) is not None:
+                box = [float(v) for v in item[key_px]]
+            else:
+                return None
+        except (TypeError, ValueError):
+            return None
+        x0, x1 = sorted((min(max(box[0], 0.0), w), min(max(box[2], 0.0), w)))
+        y0, y1 = sorted((min(max(box[1], 0.0), h), min(max(box[3], 0.0), h)))
+        if x1 - x0 < 2 or y1 - y0 < 2:
+            return None
+        return [x0, y0, x1, y1]
+
+    @staticmethod
+    def _text(value: Any) -> Optional[str]:
+        """Model output field as a trimmed string (models sometimes return numbers/objects)."""
+        if value is None or isinstance(value, (dict, list)):
+            return None
+        text = str(value).strip()
+        return text or None
+
+    @staticmethod
+    def _hex(value: Any) -> Optional[str]:
+        text = str(value).strip() if isinstance(value, (str, int)) else ""
+        return text.upper() if re.fullmatch(r"#[0-9a-fA-F]{6}", text) else None
+
+    def _canonicalize(self, detection: Dict[str, Any], size: Tuple[int, int]) -> Dict[str, Any]:
+        """
+        Normalize every box to pixel `bbox` (detection-image coordinates, used
+        by the legacy layout and the enhance crops) plus a normalized `box`
+        [0..1] used by the geometry, and coerce model-output fields to the
+        types the pipeline expects. Objects without a usable box stay in the
+        list flagged `_skip` — relations refer to objects by index.
+        """
+        if not isinstance(detection, dict):
+            return {"objects": [], "features": []}
+        w, h = size
+        for key in ("room_type", "style", "floor_type"):
+            detection[key] = self._text(detection.get(key))
+        for key in ("wall_color", "floor_color"):
+            detection[key] = self._hex(detection.get(key))
+        objects = []
+        for item in detection.get("objects") or []:
+            item = item if isinstance(item, dict) else {}
+            for key in ("label", "category", "facing"):
+                item[key] = self._text(item.get(key))
+            item["color"] = self._hex(item.get("color"))
+            if not isinstance(item.get("relations"), list):
+                item["relations"] = []
+            px = self._px_box(item, "box_2d", "bbox", size)
+            item.pop("box_2d", None)
+            if px is None:
+                item.pop("bbox", None)
+                item.pop("box", None)
+                item["_skip"] = True
+            else:
+                item["bbox"] = [int(round(v)) for v in px]
+                item["box"] = [px[0] / w, px[1] / h, px[2] / w, px[3] / h]
+            objects.append(item)
+        detection["objects"] = objects
+        features = []
+        for item in detection.get("features") or []:
+            if not isinstance(item, dict):
+                continue
+            px = self._px_box(item, "box_2d", "bbox", size)
+            if px is None:
+                continue  # nothing refers to features by index
+            for key in ("type", "style"):
+                item[key] = self._text(item.get(key))
+            item["color"] = self._hex(item.get("color"))
+            item.pop("box_2d", None)
+            item["bbox"] = [int(round(v)) for v in px]
+            item["box"] = [px[0] / w, px[1] / h, px[2] / w, px[3] / h]
+            features.append(item)
+        detection["features"] = features
+        for surface in ("wall", "floor"):
+            px = self._px_box(detection, f"{surface}_sample_box_2d", f"{surface}_sample_bbox", size)
+            detection.pop(f"{surface}_sample_box_2d", None)
+            detection[f"{surface}_sample_bbox"] = [int(round(v)) for v in px] if px else None
+        return detection
+
+    @staticmethod
+    def _render_boxes(detection: Dict[str, Any], provider: str, size: Tuple[int, int]) -> Dict[str, Any]:
+        """Re-express canonical boxes in a provider's native format (refinement prompt)."""
+        w, h = size
+        out = copy.deepcopy(detection)
+
+        def as_2d(px):
+            x0, y0, x1, y1 = px
+            return [round(y0 / h * 1000), round(x0 / w * 1000), round(y1 / h * 1000), round(x1 / w * 1000)]
+
+        for group in ("objects", "features"):
+            for item in out.get(group) or []:
+                for internal in ("box", "_skip", "_entry_id"):
+                    item.pop(internal, None)
+                if provider == "gemini" and item.get("bbox"):
+                    item["box_2d"] = as_2d(item.pop("bbox"))
+        for surface in ("wall", "floor"):
+            px = out.get(f"{surface}_sample_bbox")
+            if provider == "gemini":
+                out.pop(f"{surface}_sample_bbox", None)
+                if px:
+                    out[f"{surface}_sample_box_2d"] = as_2d(px)
+        return out
 
     # ---------- placement ----------
 
@@ -318,6 +493,8 @@ Return ONLY the corrected JSON, same schema, no commentary."""
         placed: List[tuple] = []  # (detection_index, SceneObject, det) for relations
 
         for det_idx, det in enumerate(detected[:20]):
+            if det.get("_skip"):
+                continue  # judged not to be modelable furniture
             bbox = det.get("bbox") or [0, 0, img_w, img_h]
             try:
                 x0, y0, x1, y1 = [float(v) for v in bbox]
@@ -328,8 +505,8 @@ Return ONLY the corrected JSON, same schema, no commentary."""
             if x1 - x0 < 4 or y1 - y0 < 4:
                 continue
 
-            entry = catalog_service.match(det.get("category", ""), det.get("width_m"))
-            category = catalog_service.normalize_category(det.get("category", ""))
+            entry = self._entry_for(det)
+            category = entry["category"] if entry else catalog_service.normalize_category(det.get("category", ""))
             if not entry:
                 # No catalog match (curtains, windows, unknown labels...):
                 # skip instead of rendering a meaningless box.
@@ -765,20 +942,11 @@ Return ONLY the corrected JSON, same schema, no commentary."""
             side = min(crop.width, crop.height, 512)
             crop = crop.resize((side, side))
 
-            # Flatten the lighting gradient (spotlights/shadows tile as
-            # ugly kaleidoscope patterns) by dividing out the low-frequency
-            # brightness, then reject patches that still look "busy" —
-            # they contain objects/edges, and a flat color is safer.
-            from PIL import ImageFilter
-
-            arr = np.asarray(crop.convert("RGB"), dtype=np.float32)
-            blurred = np.asarray(
-                crop.convert("RGB").filter(ImageFilter.GaussianBlur(radius=side / 4)),
-                dtype=np.float32,
-            )
-            mean_color = arr.mean(axis=(0, 1))
-            flat = arr / np.clip(blurred, 8.0, None) * mean_color
-            flat = np.clip(flat, 0, 255).astype(np.uint8)
+            # Flatten the lighting gradient, then reject patches that still
+            # look "busy" — they contain objects/edges, and a flat color is safer.
+            flat_img = self._flatten_lighting(crop)
+            flat = np.asarray(flat_img, dtype=np.uint8)
+            mean_color = np.asarray(crop.convert("RGB"), dtype=np.float32).mean(axis=(0, 1))
 
             busyness = float(flat.std(axis=(0, 1)).mean())
             limit = 38.0 if kind == "floor" else 30.0
@@ -801,11 +969,28 @@ Return ONLY the corrected JSON, same schema, no commentary."""
                 except ValueError:
                     pass
 
-            from PIL import Image as PILImage
-            return generation_service.save_texture(PILImage.fromarray(flat), kind)
+            return generation_service.save_texture(flat_img, kind)
         except Exception as e:
             print(f"[SceneBuilder] Could not sample {kind} texture: {e}")
             return None
+
+    @staticmethod
+    def _flatten_lighting(image):
+        """
+        Divide out the low-frequency brightness of a texture patch:
+        spotlights/shadows would otherwise tile as kaleidoscope patterns.
+        """
+        from PIL import Image as PILImage
+        from PIL import ImageFilter
+
+        rgb = image.convert("RGB")
+        arr = np.asarray(rgb, dtype=np.float32)
+        blurred = np.asarray(
+            rgb.filter(ImageFilter.GaussianBlur(radius=min(rgb.size) / 4)), dtype=np.float32
+        )
+        mean_color = arr.mean(axis=(0, 1))
+        flat = arr / np.clip(blurred, 8.0, None) * mean_color
+        return PILImage.fromarray(np.clip(flat, 0, 255).astype(np.uint8))
 
     # ---------- main entry ----------
 
@@ -819,7 +1004,7 @@ Return ONLY the corrected JSON, same schema, no commentary."""
         return image.resize((int(w * scale), int(h * scale)), PILImage.Resampling.LANCZOS)
 
     async def build_scene_from_image(self, image_base64: str):
-        original = depth_service._decode_base64_image(image_base64)
+        original, exif_hfov = depth_service.decode_photo(image_base64)
 
         # Detection runs at higher resolution than depth so small objects
         # (lamps, nightstands) keep enough pixels to be found and cropped.
@@ -827,20 +1012,514 @@ Return ONLY the corrected JSON, same schema, no commentary."""
         image_size = detection_image.size  # (w, h) — bbox coordinate space
         detection_base64 = depth_service._encode_image_base64(detection_image, "JPEG")
 
-        # Depth map (best-effort; placement degrades gracefully without it).
-        # Bbox->depth sampling is normalized, so different resolutions are fine.
-        depth_map = None
+        # Geometry (CPU) runs on a worker thread while the vision model reads
+        # the photo. Requests queue for it here, in the event loop, instead of
+        # parking in the shared thread pool (Gemini calls use it too). The
+        # model estimates the FOV on its own so EXIF can be cross-checked.
+        async def measure_depth():
+            async with self._depth_slot:
+                return await asyncio.to_thread(depth_service.metric_depth, original)
+
+        depth_task = asyncio.create_task(measure_depth())
+
         try:
-            depth_map, _ = depth_service.generate_depth_map_v2(image_base64)
+            detection = await self.detect_room(detection_base64, image_size)
+            # Understanding layer: second pass reviews the analysis against the photo
+            detection = await self.refine_detection(detection_base64, image_size, detection)
+            # Which catalog shape represents each item (L-shaped sofa, round table...)
+            await self._match_catalog(detection)
+        except BaseException:
+            depth_task.cancel()  # the worker thread finishes on its own; drop its result
+            raise
+
+        depth, model_hfov, depth_model = None, None, None
+        try:
+            depth, model_hfov, depth_model = await depth_task
         except Exception as e:
             print(f"[SceneBuilder] Depth estimation unavailable, using layout-only placement: {e}")
 
-        detection = await self.detect_room(detection_base64, image_size)
-        # Understanding layer: second pass reviews the analysis against the photo
-        detection = await self.refine_detection(detection_base64, image_size, detection)
-
+        # Return a high-res copy of the photo for persistence — "Make
+        # realistic" crops per-object images from it, so resolution matters.
         hires = self._capped(original, 2048)
 
+        geometry = None
+        if depth is not None:
+            try:
+                geometry = await asyncio.to_thread(
+                    self._analyze, depth, detection, image_size, exif_hfov, model_hfov, depth_model
+                )
+            except Exception as e:
+                import traceback
+
+                traceback.print_exc()
+                print(f"[SceneBuilder] Geometry analysis failed, using layout-only placement: {e}")
+
+        data = None
+        if geometry is not None:
+            try:
+                data = await asyncio.to_thread(
+                    self._measured_scene, detection, geometry, image_size, hires, depth_model
+                )
+            except Exception as e:
+                import traceback
+
+                traceback.print_exc()
+                print(f"[SceneBuilder] Measured reconstruction failed, using layout-only placement: {e}")
+        if data is None:
+            closeness = None
+            if depth is not None:
+                # Legacy layout expects disparity-like closeness (higher = nearer)
+                inv = np.where(depth > 0, 1.0 / np.maximum(depth, 1e-3), 0.0)
+                closeness = (inv - inv.min()) / max(1e-6, float(inv.max() - inv.min()))
+            data = self._layout_scene(detection, closeness, image_size, hires)
+        return data, hires
+
+    # ---------- measured reconstruction ----------
+
+    def _analyze(self, depth, detection, image_size, exif_hfov, model_hfov, depth_model):
+        """Camera + room box from depth, ignoring regions with fake depth."""
+        # Glass shows the outside, mirrors a reflected room, open doors the
+        # next room: none of it belongs to this room's walls.
+        unreliable = [f["box"] for f in detection.get("features") or []
+                      if (f.get("type") or "").lower() in ("window", "mirror", "door")]
+        unreliable += [o["box"] for o in detection.get("objects") or []
+                       if o.get("box") and catalog_service.normalize_category(o.get("category") or "") == "mirror"]
+        floor_hint = None
+        fb = detection.get("floor_sample_bbox")
+        if fb:
+            w, h = image_size
+            floor_hint = [fb[0] / w, fb[1] / h, fb[2] / w, fb[3] / h]
+        def plausible(v):
+            return v is not None and 20.0 <= v <= 130.0  # NaN fails too
+
+        exif_hfov = exif_hfov if plausible(exif_hfov) else None
+        model_hfov = model_hfov if plausible(model_hfov) else None
+        # EXIF describes the full sensor: a cropped photo keeps the 35mm focal
+        # but shows a narrower view. Trust it only when the model agrees.
+        use_exif = exif_hfov is not None and (
+            model_hfov is None or abs(exif_hfov - model_hfov) <= 0.15 * model_hfov
+        )
+        if exif_hfov is not None and not use_exif:
+            print(f"[SceneBuilder] EXIF FOV {exif_hfov:.0f} disagrees with the model's "
+                  f"{model_hfov:.0f} (cropped photo?) — using the model")
+        fov = exif_hfov if use_exif else model_hfov
+        return room_geometry.analyze_room(
+            depth,
+            image_size,
+            fov_hint=fov,
+            fov_source="exif" if use_exif else (depth_model or "model"),
+            exclude_boxes=unreliable,
+            floor_hint_box=floor_hint,
+            estimate=detection.get("room_estimate") or {},
+        )
+
+    # Typical heights (m) with how standardized they are (cue weight). Only
+    # counters, tables and appliances are truly standard; designer
+    # nightstands and sofas vary a lot, so they barely count.
+    STANDARD_HEIGHTS = {
+        "table": (0.75, 1.0), "desk": (0.75, 1.0), "kitchen_cabinet": (0.9, 1.0),
+        "kitchen_island": (0.9, 1.0), "stove": (0.9, 0.8), "washing_machine": (0.85, 0.8),
+        "sink": (0.85, 0.5), "nightstand": (0.55, 0.2), "sofa": (0.85, 0.2),
+        "armchair": (0.85, 0.2), "chair": (0.88, 0.3), "fridge": (1.8, 0.5),
+        "toilet": (0.75, 0.4), "coffee_table": (0.45, 0.2), "side_table": (0.55, 0.2),
+        "dresser": (0.85, 0.2), "wardrobe": (2.0, 0.2), "console": (0.8, 0.2),
+        "sideboard": (0.8, 0.2), "bench": (0.45, 0.2), "bathtub": (0.55, 0.3),
+    }
+    # Things that can stand on other furniture; everything else is on the floor
+    STACKABLE = {"lamp_table", "plant", "tv", "mirror"}
+
+    def _measured_scene(self, detection, geom, image_size, hires, depth_model) -> SceneData:
+        # Keyed by the original index: relations ("on": 2) refer to it
+        dets = {i: d for i, d in enumerate((detection.get("objects") or [])[:20]) if not d.get("_skip")}
+
+        # Nearest first (lower bottom edge = closer): each object claims only
+        # its own depth-edge-bounded blob, so a bed in front of a nightstand
+        # can't hand the nightstand its duvet, nor swallow a console behind it.
+        order = sorted(dets, key=lambda i: -dets[i]["box"][3])
+        occupied = np.zeros(geom.valid.shape, bool)
+        placed: Dict[int, tuple] = {}
+        for i in order:
+            det = dets[i]
+            entry = self._entry_for(det)
+            if entry is None:
+                print(f"[SceneBuilder] Skipping unmatched detection: {det.get('label')} ({det.get('category')})")
+                continue
+            category = entry["category"]
+            est = room_geometry.place_object(
+                geom, det["box"], self._prior_dims(entry, det),
+                facing=det.get("facing"),
+                wall_hugger=category in self.WALL_HUGGERS,
+                flat=category == "rug",
+                occupied=occupied,
+                stackable=category in self.STACKABLE,
+            )
+            if est is None:
+                print(f"[SceneBuilder] Could not place {det.get('label')}: no usable depth or floor contact")
+                continue
+            if est.mask is not None and category != "rug":
+                occupied |= est.mask
+            placed[i] = (det, entry, est)
+
+        # Metric-scale correction from things of standard size
+        s = self._scale_from_cues(placed, detection, geom)
+        if s:
+            print(f"[SceneBuilder] Metric scale correction x{s:.3f}")
+            room_geometry.rescale(geom, s)
+            placed = {i: (d, e, est.scaled(s)) for i, (d, e, est) in placed.items()}
+
+        objects = self._objects_from_estimates(placed, geom, hires, image_size)
+        room = self._measured_shell(detection, geom, image_size, hires, placed)
+        room.features = self._measured_features(detection, geom)
+
+        return SceneData(
+            room_type=detection.get("room_type") or "room",
+            style=detection.get("style"),
+            room=room,
+            objects=objects,
+            camera=SceneCamera(**geom.editor_camera()),
+            projection=self._projection(geom, hires),
+            geometry={"source": "measured", "model": depth_model, **geom.quality},
+        )
+
+    def _entry_for(self, det: Dict[str, Any]) -> Optional[dict]:
+        if det.get("_entry_id"):
+            entry = catalog_service.get_entry(det["_entry_id"])
+            if entry:
+                return entry
+        return catalog_service.match_label(det.get("label") or "", det.get("category") or "", det.get("width_m"))
+
+    def _prior_dims(self, entry: dict, det: Dict[str, Any]) -> List[float]:
+        """Expected size: catalog proportions scaled to the model's width estimate."""
+        dims = [float(v) for v in entry["dims_m"]]
+        try:
+            width = float(det.get("width_m") or 0)
+        except (TypeError, ValueError):
+            width = 0.0
+        if width > 0:
+            ratio = self._clamp(width / dims[0], 0.6, 1.6)
+            dims = [dims[0] * ratio, dims[1], dims[2] * ratio]
+        return dims
+
+    def _scale_from_cues(self, placed, detection, geom) -> Optional[float]:
+        cues = []
+        cam = geom.t
+        for det, entry, est in placed.values():
+            if est.method != "depth" or est.confidence < 0.5:
+                continue
+            std = self.STANDARD_HEIGHTS.get(entry["category"])
+            if std and est.visible_height:
+                cues.append((std[0], est.visible_height, std[1]))
+            # Widths only for pieces seen face-on (side-on widths are foreshortened)
+            try:
+                est_w = float(det.get("width_m") or 0)
+            except (TypeError, ValueError):
+                est_w = 0.0
+            if est_w and est.visible_width:
+                yaw = np.radians(est.rot_y_deg)
+                front = np.array([np.sin(yaw), np.cos(yaw)])
+                to_cam = np.array([cam[0] - est.center[0], cam[2] - est.center[2]])
+                if front @ to_cam > 0.7 * np.linalg.norm(to_cam):
+                    cues.append((est_w, est.visible_width, 0.2))
+        for det in detection.get("features") or []:
+            if (det.get("type") or "").lower() != "door":
+                continue
+            box = det["box"]
+            if box[1] < 0.02 or box[3] > 0.98:
+                continue  # top or bottom cut off
+            f = room_geometry.place_feature(geom, box, "door")
+            if f and f.bottom < 0.15:
+                cues.append((2.03, f.height, 1.2))
+        if geom.box.observed.get("ceiling"):
+            cues.append((2.6, geom.box.height, 1.0))
+        s = room_geometry.semantic_scale(cues)
+        if s is None or abs(s - 1.0) < 0.04:
+            return None
+        return float(np.clip(s, 0.85, 1.18))
+
+    @staticmethod
+    def _footprint_half(obj: SceneObject) -> Tuple[float, float]:
+        w, _, d = obj.dimensions_m
+        quarter = round((obj.transform.rot_y_deg % 180.0) / 90.0) % 2 == 1
+        return (d / 2.0, w / 2.0) if quarter else (w / 2.0, d / 2.0)
+
+    def _objects_from_estimates(self, placed, geom, hires, image_size) -> List[SceneObject]:
+        by_index: Dict[int, SceneObject] = {}
+        confidence: Dict[str, float] = {}
+        for i, (det, entry, est) in placed.items():
+            color = self._pixels_color(hires, est.mask) if entry["category"] != "rug" else None
+            if not color:
+                color = det.get("color") if isinstance(det.get("color"), str) else None
+            obj = SceneObject(
+                id=f"{entry['category']}_{uuid.uuid4().hex[:6]}",
+                category=entry["category"],
+                label=det.get("label") or entry["name"],
+                asset=AssetRef(type="catalog", ref=entry["id"]),
+                transform=Transform(
+                    pos=[round(est.center[0], 3), round(est.center[1], 3), round(est.center[2], 3)],
+                    rot_y_deg=est.rot_y_deg,
+                ),
+                dimensions_m=[round(float(v), 3) for v in est.dims],
+                material_override=MaterialDef(color=color) if color else None,
+                source={
+                    "detected_from": "photo",
+                    "bbox": det["bbox"],
+                    "img_size": list(image_size),  # bbox coordinate space
+                    "box": [round(v, 4) for v in det["box"]],
+                    "raw_category": det.get("category"),
+                    "facing": det.get("facing"),
+                    "method": est.method,
+                    "confidence": est.confidence,
+                },
+            )
+            by_index[i] = obj
+            confidence[obj.id] = est.confidence
+
+        # Stack small things on their support ("lamp ON nightstand")
+        for i, (det, entry, est) in placed.items():
+            obj = by_index[i]
+            support = None
+            for rel in det.get("relations") or []:
+                if isinstance(rel, dict) and (rel.get("type") or "").lower() == "on":
+                    try:
+                        support = by_index.get(int(rel.get("target")))
+                    except (TypeError, ValueError):
+                        support = None
+            explicit = support is not None
+            if support is None and obj.transform.pos[1] > 0.15:
+                support = self._support_below(obj, by_index.values())
+            if support is None or support.id == obj.id:
+                continue
+            if explicit and est.method != "depth" and obj.dimensions_m[1] > 0.7:
+                # Unmeasured prior (e.g. a floor-lamp size for a bedside lamp)
+                obj.dimensions_m[1] = 0.55
+            if obj.dimensions_m[1] > 1.2:
+                continue
+            top = support.transform.pos[1] + support.dimensions_m[1]
+            if top + obj.dimensions_m[1] > geom.box.height - 0.1:
+                continue
+            obj.transform.pos[1] = round(top, 3)
+            hx, hz = self._footprint_half(support)
+            ox, oz = self._footprint_half(obj)
+            sx, sz = support.transform.pos[0], support.transform.pos[2]
+            obj.transform.pos[0] = round(self._clamp(obj.transform.pos[0], sx - max(0.0, hx - ox), sx + max(0.0, hx - ox)), 3)
+            obj.transform.pos[2] = round(self._clamp(obj.transform.pos[2], sz - max(0.0, hz - oz), sz + max(0.0, hz - oz)), 3)
+
+        objects = list(by_index.values())
+        self._separate(objects, geom.box, confidence)
+        return objects
+
+    def _support_below(self, obj: SceneObject, others) -> Optional[SceneObject]:
+        """The object whose top surface this one rests on, if any."""
+        ox, oz = obj.transform.pos[0], obj.transform.pos[2]
+        best = None
+        for other in others:
+            if other.id == obj.id or other.transform.pos[1] > 0.05:
+                continue
+            hx, hz = self._footprint_half(other)
+            if abs(ox - other.transform.pos[0]) > hx or abs(oz - other.transform.pos[2]) > hz:
+                continue
+            top = other.transform.pos[1] + other.dimensions_m[1]
+            gap = abs(obj.transform.pos[1] - top)
+            if gap < 0.25 and (best is None or gap < best[0]):
+                best = (gap, other)
+        return best[1] if best else None
+
+    def _separate(self, objects: List[SceneObject], box, confidence: Dict[str, float]) -> None:
+        """
+        Resolve footprint overlaps left by measurement noise: the less
+        certain object yields, along the axis of least penetration.
+        """
+        floor_objs = [o for o in objects if o.category != "rug" and o.transform.pos[1] < 0.05]
+        for _ in range(4):
+            moved = False
+            for a_i in range(len(floor_objs)):
+                for b_i in range(a_i + 1, len(floor_objs)):
+                    a, b = floor_objs[a_i], floor_objs[b_i]
+                    ahx, ahz = self._footprint_half(a)
+                    bhx, bhz = self._footprint_half(b)
+                    dx = b.transform.pos[0] - a.transform.pos[0]
+                    dz = b.transform.pos[2] - a.transform.pos[2]
+                    px = ahx + bhx - abs(dx)
+                    pz = ahz + bhz - abs(dz)
+                    if px <= 0.01 or pz <= 0.01:
+                        continue
+                    mover, anchor = (a, b) if confidence.get(a.id, 0) < confidence.get(b.id, 0) else (b, a)
+                    sign = 1.0 if mover is b else -1.0
+                    mhx, mhz = self._footprint_half(mover)
+                    if px < pz:
+                        step = (px + 0.02) * (1.0 if dx >= 0 else -1.0) * sign
+                        mover.transform.pos[0] = round(self._clamp(
+                            mover.transform.pos[0] + step, box.x_min + mhx, box.x_max - mhx), 3)
+                    else:
+                        step = (pz + 0.02) * (1.0 if dz >= 0 else -1.0) * sign
+                        mover.transform.pos[2] = round(self._clamp(
+                            mover.transform.pos[2] + step, box.z_min + mhz, box.z_max - mhz), 3)
+                    moved = True
+            if not moved:
+                break
+
+    @staticmethod
+    def _pixels_color(hires, mask) -> Optional[str]:
+        """Representative color of masked photo pixels (lit side, not shadows)."""
+        if mask is None or mask.sum() < 20:
+            return None
+        import cv2
+
+        m = cv2.resize(mask.astype(np.uint8), hires.size, interpolation=cv2.INTER_NEAREST).astype(bool)
+        px = np.asarray(hires.convert("RGB"))[m].astype(np.float32)
+        if len(px) < 50:
+            return None
+        if len(px) > 40000:
+            px = px[np.random.default_rng(0).choice(len(px), 40000, replace=False)]
+        lum = px @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
+        lo, hi = np.percentile(lum, [50, 92])
+        sel = px[(lum >= lo) & (lum <= hi)]
+        if len(sel) < 10:
+            sel = px
+        r, g, b = np.median(sel, axis=0)
+        return "#{:02X}{:02X}{:02X}".format(int(r), int(g), int(b))
+
+    def _structure_color(self, hires, geom, label: int) -> Optional[str]:
+        return self._pixels_color(hires, geom.structure == label)
+
+    def _measured_shell(self, detection, geom, image_size, hires, placed) -> RoomShell:
+        from .generation_service import generation_service
+
+        b = geom.box
+        obstacles = [o.get("bbox") for o in (detection.get("objects") or []) if o.get("bbox")]
+        obstacles += [f.get("bbox") for f in (detection.get("features") or []) if f.get("bbox")]
+
+        # Top-down floor patch at its true metric size
+        blocked = np.zeros(geom.valid.shape, bool)
+        for _, _, est in placed.values():
+            if est.mask is not None:
+                blocked |= est.mask
+        floor_url, tile_m = None, None
+        try:
+            patch, tile_m = room_geometry.rectified_floor_patch(hires, geom, blocked)
+            if patch is not None:
+                floor_url = generation_service.save_texture(self._flatten_lighting(patch), "floor")
+        except Exception as e:
+            print(f"[SceneBuilder] Floor rectification failed: {e}")
+        if floor_url is None:
+            tile_m = None
+            floor_url = self._sample_texture(
+                hires, image_size, detection.get("floor_sample_bbox"), "floor",
+                obstacles=obstacles, expected_color=detection.get("floor_color"),
+            )
+
+        wall_color = self._structure_color(hires, geom, room_geometry.WALL) or detection.get("wall_color") or "#F2EDE4"
+        floor_color = self._structure_color(hires, geom, room_geometry.FLOOR) or detection.get("floor_color") or "#A98B6D"
+        ceiling_color = self._structure_color(hires, geom, room_geometry.CEILING) or "#FFFFFF"
+        return RoomShell(
+            width_m=round(b.width, 3),
+            depth_m=round(b.depth, 3),
+            height_m=round(b.height, 3),
+            wall_material=MaterialDef(
+                color=wall_color,
+                texture_url=self._sample_texture(
+                    hires, image_size, detection.get("wall_sample_bbox"), "wall",
+                    obstacles=obstacles, expected_color=wall_color,
+                ),
+            ),
+            floor_material=MaterialDef(
+                color=floor_color,
+                texture=detection.get("floor_type"),
+                texture_url=floor_url,
+                texture_scale_m=round(tile_m, 3) if tile_m else None,
+            ),
+            ceiling_material=MaterialDef(color=ceiling_color),
+        )
+
+    FEATURE_DEFAULTS = {
+        "window": "#EAF2F8", "door": "#EFEBE2", "curtain": "#B9B2A6",
+        "art": "#D8D2C4", "pendant": "#E8E4DA", "mirror": "#C3D3DC",
+    }
+
+    @staticmethod
+    def _normalize_style(ftype: str, style: Optional[str]) -> Optional[str]:
+        """Models return free-form styles; map them to what the editor renders."""
+        style = (style or "").strip().lower() or None
+        if not style:
+            return None
+        if ftype == "curtain":
+            return "sheer" if any(k in style for k in ("sheer", "voile", "translucent")) else "solid"
+        if ftype == "window":
+            if "floor" in style or "full" in style:
+                return "floor_to_ceiling"
+            if "slid" in style:
+                return "sliding_door"
+            return "standard"
+        return style
+
+    def _measured_features(self, detection, geom) -> List[WallFeature]:
+        features: List[WallFeature] = []
+        for det in (detection.get("features") or [])[:10]:
+            ftype = (det.get("type") or "").strip().lower()
+            if ftype not in self.FEATURE_DEFAULTS:
+                continue
+            est = room_geometry.place_feature(geom, det["box"], ftype)
+            if est is None:
+                print(f"[SceneBuilder] Could not place {ftype} on a wall")
+                continue
+            style = self._normalize_style(ftype, det.get("style"))
+            features.append(WallFeature(
+                id=f"{ftype}_{uuid.uuid4().hex[:6]}",
+                type=ftype,
+                style=style,
+                wall=est.wall,
+                center_x_m=round(est.center_along, 3),
+                center_z_m=round(est.center_z, 3),
+                width_m=round(est.width, 3),
+                height_m=round(est.height, 3),
+                bottom_m=round(est.bottom, 3),
+                color=det.get("color") if isinstance(det.get("color"), str) else self.FEATURE_DEFAULTS[ftype],
+            ))
+        return features
+
+    def _projection(self, geom, hires) -> Optional[PhotoProjection]:
+        """Mask of bare shell pixels, so the editor can project the photo onto walls/floor."""
+        from .generation_service import generation_service
+
+        try:
+            mask = room_geometry.structure_mask_image(geom, hires.size)
+            url = generation_service.save_texture(mask.convert("RGB"), "mask")
+            return PhotoProjection(mask_url=url, width=hires.width, height=hires.height)
+        except Exception as e:
+            print(f"[SceneBuilder] Projection mask failed: {e}")
+            return None
+
+    async def _match_catalog(self, detection: Dict[str, Any]) -> None:
+        """
+        Pick each object's catalog entry. The shape matters for fidelity
+        (an L-shaped sectional vs a straight sofa, a round vs a rectangular
+        table), so labels are judged semantically with TypeSafe when it is
+        configured; label rules otherwise. Non-furniture is flagged _skip.
+        """
+        objects = detection.get("objects") or []
+        picks = await semantic_service.match_catalog(objects, detection.get("room_type") or "room")
+        for det, pick in zip(objects, picks):
+            if pick is not None:
+                if pick == "none":
+                    det["_skip"] = True
+                else:
+                    det["_entry_id"] = pick
+                continue
+            on_furniture = any(
+                isinstance(r, dict) and (r.get("type") or "").lower() == "on"
+                for r in det.get("relations") or []
+            )
+            entry = catalog_service.match_label(
+                det.get("label") or "", det.get("category") or "", det.get("width_m"),
+                on_furniture=on_furniture,
+            )
+            if entry:
+                det["_entry_id"] = entry["id"]
+
+    # ---------- layout-only fallback ----------
+
+    def _layout_scene(self, detection, depth_map, image_size, hires) -> SceneData:
+        """The vision model's floor plan, when the room can't be measured."""
         # Anything detected is an obstacle for material sampling: a texture
         # patch containing furniture/curtains tiles as garbage.
         obstacles = [o.get("bbox") for o in (detection.get("objects") or []) if o.get("bbox")]
@@ -875,18 +1554,16 @@ Return ONLY the corrected JSON, same schema, no commentary."""
         # NOTE: detection bboxes are relative to the image we described in the prompt;
         # depth map is the same size, so coordinates line up.
         objects = self._place_objects(
-            detection.get("objects") or [], depth_map, image_size, room
+            detection.get("objects") or [], depth_map, image_size, room,
         )
 
-        data = SceneData(
+        return SceneData(
             room_type=detection.get("room_type") or "room",
             style=detection.get("style"),
             room=room,
             objects=objects,
+            geometry={"source": "estimated"},
         )
-        # Return a high-res copy of the photo for persistence — "Make
-        # realistic" crops per-object images from it, so resolution matters.
-        return data, self._capped(original, 2048)
 
 
 scene_builder = SceneBuilder()

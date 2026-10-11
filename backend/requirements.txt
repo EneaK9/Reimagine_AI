@@ -16,8 +16,17 @@ opencv-python>=4.8.0  # Required for MiDaS transforms
 open3d>=0.17.0  # 3D mesh generation and processing
 numpy>=1.24.0
 scipy>=1.10.0
-transformers>=4.40.0  # Depth Anything V2 for scene building (optional at runtime)
+transformers>=4.40.0  # Depth Anything V2 metric (geometry fallback)
 rembg>=2.0.50  # Background removal for image-to-3D furniture generation
+trimesh>=4.4  # Reads generated GLBs to check their orientation against the photo
+# Scene geometry: MoGe-2 (MIT) — metric depth + camera FOV from one photo.
+# Installed separately WITHOUT dependencies (its demo pulls in gradio); see
+# the Dockerfile, or locally:
+#   pip install --no-deps "moge @ https://github.com/microsoft/MoGe/archive/07444410f1e33f402353b99d6ccd26bd31e469e8.zip" \
+#     "utils3d @ https://github.com/EasternJournalist/utils3d/archive/3fab839f0be9931dac7c8488eb0e1600c236e183.zip"
+
+# Typed judgments (catalog shapes, chat routing, instant simple edits)
+typesafe-sdk>=0.7.2
 
 # Database
 sqlalchemy>=2.0.25

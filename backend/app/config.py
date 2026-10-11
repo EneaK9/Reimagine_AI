@@ -63,6 +63,15 @@ class Settings(BaseSettings):
     fal_api_key: str = ""
     # TRELLIS.2: much better geometry/texture than v1 for furniture
     image_to_3d_model: str = "fal-ai/trellis-2"
+    # Mesh budget per generated object: fal's default (500k faces, 2K
+    # textures) makes ~18 MB GLBs; this keeps them light enough for phones.
+    image_to_3d_faces: int = 60000
+    image_to_3d_texture: int = 1024
+
+    # TypeSafe System One (Jev): fast typed judgments (catalog shapes, chat
+    # routing, simple 3D edits). Optional — rules are used when unset.
+    typesafe_api_key: str = ""
+    typesafe_model: str = "jev-latest"
 
     class Config:
         env_file = ".env"

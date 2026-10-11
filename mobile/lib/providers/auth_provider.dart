@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,6 +13,13 @@ class AuthProvider with ChangeNotifier {
   bool _isLoading = false;
   String? _error;
   bool _isInitialized = false;
+  Future<void>? _initializing;
+  bool _sessionExpired = false;
+  bool _disposed = false;
+
+  AuthProvider() {
+    _apiService.onUnauthorized = _handleUnauthorized;
+  }
 
   // Getters
   User? get user => _user;
@@ -21,30 +29,106 @@ class AuthProvider with ChangeNotifier {
   bool get isLoggedIn => _token != null && _user != null;
   bool get isInitialized => _isInitialized;
 
-  /// Initialize auth state from stored token
-  Future<void> initialize() async {
-    if (_isInitialized) return;
-    
+  /// Restore the saved session (called once at app startup).
+  Future<void> initialize() => _initializing ??= _restoreSession();
+
+  Future<void> _restoreSession() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      _token = prefs.getString('auth_token');
-      
-      if (_token != null) {
-        // Set token on API service
-        _apiService.setAuthToken(_token);
-        
+      final token = prefs.getString('auth_token');
+
+      if (token != null && token.isNotEmpty) {
+        _token = token;
+        _apiService.setAuthToken(token);
+
         // Load stored user data
         final userData = prefs.getString('user_data');
         if (userData != null) {
-          _user = User.fromJson(jsonDecode(userData));
+          _user = User.fromJson(jsonDecode(userData) as Map<String, dynamic>);
         }
+
+        await _validateSession();
       }
     } catch (e) {
-      _error = e.toString();
+      debugPrint('[Auth] Could not restore the saved session: $e');
     }
-    
+
     _isInitialized = true;
-    notifyListeners();
+    _notify();
+  }
+
+  /// Check the restored token with the backend. A 401 signs the user out;
+  /// network trouble keeps the session so the app still opens when the
+  /// server is slow or unreachable (a later 401 still signs out).
+  Future<void> _validateSession() async {
+    try {
+      final me = await _apiService
+          .getCurrentUser()
+          .timeout(const Duration(seconds: 6));
+      if (_token == null) return; // rejected meanwhile
+      _user = User(
+        id: me['id']?.toString() ?? _user?.id ?? '',
+        email: me['email']?.toString() ?? _user?.email ?? '',
+        username: me['username']?.toString() ?? _user?.username ?? '',
+        avatarUrl: _user?.avatarUrl,
+      );
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_data', jsonEncode(_user!.toJson()));
+    } on ApiException catch (e) {
+      if (e.statusCode == 401) {
+        _forgetSession();
+        await _clearStoredSession();
+      }
+    } catch (e) {
+      debugPrint('[Auth] Session check skipped: $e');
+    }
+  }
+
+  /// The backend rejected the current token (see [ApiService.onUnauthorized]).
+  void _handleUnauthorized() {
+    if (_token == null) return;
+    // During startup the first screen simply becomes sign-in; afterwards the
+    // app is told to send the user back there.
+    if (_isInitialized) _sessionExpired = true;
+    _forgetSession();
+    _notify();
+    unawaited(_clearStoredSession());
+  }
+
+  /// Returns true once after the session was rejected by the backend.
+  bool consumeSessionExpired() {
+    final expired = _sessionExpired;
+    _sessionExpired = false;
+    return expired;
+  }
+
+  void _forgetSession() {
+    _user = null;
+    _token = null;
+    _apiService.setAuthToken(null);
+  }
+
+  Future<void> _clearStoredSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('auth_token');
+      await prefs.remove('user_data');
+    } catch (e) {
+      debugPrint('[Auth] Could not clear the saved session: $e');
+    }
+  }
+
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    if (_apiService.onUnauthorized == _handleUnauthorized) {
+      _apiService.onUnauthorized = null;
+    }
+    super.dispose();
   }
 
   /// Login with email and password
@@ -55,7 +139,8 @@ class AuthProvider with ChangeNotifier {
 
     try {
       final response = await _apiService.login(email, password);
-      
+
+      _sessionExpired = false;
       _user = User(
         id: response.id,
         email: response.email,
@@ -87,7 +172,8 @@ class AuthProvider with ChangeNotifier {
 
     try {
       final response = await _apiService.signup(username, email, password);
-      
+
+      _sessionExpired = false;
       _user = User(
         id: response.id,
         email: response.email,

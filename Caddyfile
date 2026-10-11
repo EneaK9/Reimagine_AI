@@ -9,6 +9,12 @@
 62.238.120.111.sslip.io {
 	encode gzip
 
+	# Photos are capped at 10 MB by the API (base64 JSON adds ~33%): reject
+	# anything bigger before it is buffered upstream
+	request_body {
+		max_size 15MB
+	}
+
 	# Scene generate / enhance can run for several minutes
 	reverse_proxy api:8100 {
 		transport http {

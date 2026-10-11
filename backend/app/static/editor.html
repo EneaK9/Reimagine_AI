@@ -23,6 +23,12 @@
   .cat-item { background: #2C2720; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 8px; font-size: 12px; cursor: pointer; }
   #addBtn { position: absolute; right: 12px; bottom: 12px; width: 46px; height: 46px; border-radius: 23px; background: #C98E5A; color: #191510; font-size: 26px; border: none; line-height: 44px; display: block; }
   #addBtn.hidden { display: none; }
+  #photoOverlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; opacity: 0; transition: opacity .25s; z-index: 1; }
+  .panel, #hud, #addBtn, #viewBtn { z-index: 2; }
+  #viewBtn { position: absolute; left: 12px; bottom: 12px; height: 46px; border-radius: 23px; padding: 0 14px; background: rgba(26,23,19,.9); color: #EDE8DF; border: 1px solid rgba(255,255,255,.14); font-size: 13px; display: none; }
+  #viewBtn.hidden { display: none !important; }
+  #view-panel .row label { font-size: 12px; color: #C9C1B4; }
+  #compareSlider { flex: 1; accent-color: #C98E5A; }
 </style>
 </head>
 <body>
@@ -70,6 +76,23 @@
   <div id="catalog-list"></div>
 </div>
 
+<div id="view-panel" class="panel">
+  <div class="row">
+    <span class="title">Your photo</span>
+    <button class="btn" id="photoViewBtn">📷 Photo viewpoint</button>
+    <button class="btn primary" id="viewDoneBtn">Done</button>
+  </div>
+  <div class="row">
+    <label for="compareSlider">Compare</label>
+    <input type="range" id="compareSlider" min="0" max="100" value="0" />
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="projToggle" checked /> Real walls &amp; floor from the photo</label>
+  </div>
+</div>
+
+<img id="photoOverlay" alt="" />
+<button id="viewBtn">📷 Photo</button>
 <button id="addBtn">＋</button>
 
 <script type="importmap">
@@ -200,7 +223,7 @@ async function standaloneInit() {
       apiFetch('/scenes/catalog'),
     ]);
     serverVersion = scene.version;
-    window.RAI.loadScene(scene.data, cat);
+    window.RAI.loadScene(scene.data, cat, { apiBase: API_BASE, token: AUTH_TOKEN, sceneId: standaloneSceneId });
   } catch (e) {
     setStatus(`Could not load scene: ${e.message}`);
   }
@@ -235,6 +258,21 @@ let dragOffset = new THREE.Vector3();
 const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const gltfLoader = new GLTFLoader();
 let localIdCounter = 1;
+
+// ---------------- Photo match (camera, projection, compare) ----------------
+// The backend recovers the camera that took the photo. The editor opens at
+// that viewpoint, projects the real photo onto walls/floor/ceiling (only
+// where the photo shows bare shell — furniture pixels are masked out), and
+// can fade the photo over the scene to compare.
+let hostOpts = {};          // { apiBase, token, sceneId } from Flutter or the URL
+let photoView = false;      // camera sits exactly at the photo's viewpoint
+let photoLoadedFor = null;  // scene id whose photo textures are loaded
+const photoUniforms = {
+  photoMap: { value: null },
+  photoMask: { value: null },
+  photoMatrix: { value: new THREE.Matrix4() },
+  photoStrength: { value: 0.0 },
+};
 
 const statusEl = document.getElementById('status');
 const objPanel = document.getElementById('object-panel');
@@ -276,9 +314,13 @@ function initGL() {
 
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
+    if (sceneData?.camera) camera.fov = fitFov(sceneData.camera);
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
+
+  // Any orbit gesture leaves the exact photo viewpoint
+  controls.addEventListener('start', () => leavePhotoView());
 
   renderer.domElement.addEventListener('pointerdown', onPointerDown);
   renderer.domElement.addEventListener('pointermove', onPointerMove);
@@ -286,9 +328,117 @@ function initGL() {
 
   (function loop() {
     requestAnimationFrame(loop);
-    controls.update();
+    // OrbitControls re-aims with lookAt (dropping the photo's slight roll),
+    // so it only runs once the user leaves the photo viewpoint
+    if (!photoView) controls.update();
     renderer.render(scene3, camera);
   })();
+}
+
+// Vertical FOV that shows the whole photo frame in this viewport ("contain",
+// same framing as the overlay image's object-fit: contain)
+function fitFov(cam) {
+  const viewAspect = window.innerWidth / window.innerHeight;
+  const t = Math.tan(THREE.MathUtils.degToRad(cam.fov_deg) / 2);
+  const tv = viewAspect >= cam.aspect ? t : t * cam.aspect / viewAspect;
+  return THREE.MathUtils.radToDeg(2 * Math.atan(tv));
+}
+
+function goToPhotoView() {
+  const c = sceneData?.camera;
+  if (!c) return false;
+  camera.position.fromArray(c.position);
+  camera.quaternion.fromArray(c.quaternion);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.fov = fitFov(c);
+  camera.updateProjectionMatrix();
+  controls.target.fromArray(c.target);
+  photoView = true;
+  updateOverlay();
+  return true;
+}
+
+function leavePhotoView() {
+  if (!photoView) return;
+  photoView = false;
+  updateOverlay();
+}
+
+function updateOverlay() {
+  const img = document.getElementById('photoOverlay');
+  const v = Number(document.getElementById('compareSlider').value) / 100;
+  img.style.opacity = photoView && img.src ? String(v) : '0';
+}
+
+function absUrl(url) {
+  if (!url) return url;
+  if (/^(https?:|blob:|data:)/.test(url)) return url;
+  return (hostOpts.apiBase || location.origin) + url;
+}
+
+async function loadPhoto() {
+  const sceneId = hostOpts.sceneId;
+  if (!sceneData?.camera || !sceneData?.projection || !sceneId) return;
+  if (photoLoadedFor === sceneId) return;
+  try {
+    const res = await fetch(`${hostOpts.apiBase || location.origin}/api/v1/scenes/${sceneId}/photo`, {
+      headers: hostOpts.token ? { Authorization: `Bearer ${hostOpts.token}` } : {},
+    });
+    if (!res.ok) throw new Error(`photo ${res.status}`);
+    const photoUrl = URL.createObjectURL(await res.blob());
+    const [photo, mask] = await Promise.all([
+      texLoader.loadAsync(photoUrl),
+      texLoader.loadAsync(absUrl(sceneData.projection.mask_url)),
+    ]);
+    photo.colorSpace = THREE.SRGBColorSpace;
+    mask.colorSpace = THREE.NoColorSpace;
+    photoUniforms.photoMap.value = photo;
+    photoUniforms.photoMask.value = mask;
+    photoUniforms.photoStrength.value = document.getElementById('projToggle').checked ? 1.0 : 0.0;
+    document.getElementById('photoOverlay').src = photoUrl;
+    photoLoadedFor = sceneId;
+    updatePhotoMatrix();
+    updateOverlay();
+  } catch (e) {
+    console.warn('Photo projection unavailable:', e);
+  }
+}
+
+function updatePhotoMatrix() {
+  const c = sceneData?.camera;
+  if (!c) return;
+  const pc = new THREE.PerspectiveCamera(c.fov_deg, c.aspect, 0.05, 100);
+  pc.position.fromArray(c.position);
+  pc.quaternion.fromArray(c.quaternion);
+  pc.updateMatrixWorld(true);
+  pc.updateProjectionMatrix();
+  photoUniforms.photoMatrix.value.multiplyMatrices(pc.projectionMatrix, pc.matrixWorldInverse);
+}
+
+// Project the photo onto a shell material (walls/floor/ceiling/wall features)
+function withPhotoProjection(material, enabled) {
+  if (!enabled) return material;
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, photoUniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform mat4 photoMatrix;\nvarying vec4 vPhotoClip;')
+      .replace('#include <project_vertex>',
+        '#include <project_vertex>\nvPhotoClip = photoMatrix * modelMatrix * vec4(transformed, 1.0);');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>',
+        '#include <common>\nuniform sampler2D photoMap;\nuniform sampler2D photoMask;\nuniform float photoStrength;\nvarying vec4 vPhotoClip;')
+      .replace('#include <opaque_fragment>', `
+        if (photoStrength > 0.0 && vPhotoClip.w > 0.0) {
+          vec2 puv = vPhotoClip.xy / vPhotoClip.w * 0.5 + 0.5;
+          if (puv.x > 0.001 && puv.x < 0.999 && puv.y > 0.001 && puv.y < 0.999) {
+            float m = texture2D(photoMask, puv).r * photoStrength;
+            outgoingLight = mix(outgoingLight, texture2D(photoMap, puv).rgb, m);
+          }
+        }
+        #include <opaque_fragment>`);
+  };
+  material.customProgramCacheKey = () => 'photo-projection';
+  return material;
 }
 
 // ---------------- Materials ----------------
@@ -493,12 +643,14 @@ function buildRoom() {
 
   // Interior-visible box for walls+ceiling (BackSide: near walls auto-hide)
   const wallGeo = new THREE.BoxGeometry(w, h, d);
+  const projects = (m) => !!sceneData.camera && m?.photo_projection !== false;
   // Photo-sampled wall texture when available (real material from the photo)
-  const wallMat = r.wall_material.texture_url
+  const wallMat = withPhotoProjection(r.wall_material.texture_url
     ? mat('#FFFFFF', { roughness: 0.95,
         extra: { map: photoTexture(r.wall_material.texture_url, Math.max(2, w / 1.4), Math.max(1.5, h / 1.4)) } })
-    : mat(r.wall_material.color, { roughness: 0.95 });
-  const ceilMat = mat(r.ceiling_material?.color || '#ffffff', { roughness: 0.95 });
+    : mat(r.wall_material.color, { roughness: 0.95 }), projects(r.wall_material));
+  const ceilMat = withPhotoProjection(
+    mat(r.ceiling_material?.color || '#ffffff', { roughness: 0.95 }), projects(r.ceiling_material));
   const invisible = new THREE.MeshBasicMaterial({ visible: false });
   wallMat.side = THREE.BackSide; ceilMat.side = THREE.BackSide;
   // Box material order: +x, -x, +y (ceiling), -y (floor), +z, -z
@@ -511,8 +663,12 @@ function buildRoom() {
   const kind = floorKind(r.floor_material);
   let floorMat;
   if (r.floor_material.texture_url) {
+    // Perspective-corrected patches carry their real size: tile at true scale
+    const tile = r.floor_material.texture_scale_m;
+    const rx = tile ? w / tile : Math.max(2, w / 1.6);
+    const ry = tile ? d / tile : Math.max(2, d / 1.6);
     floorMat = mat('#FFFFFF', { roughness: 0.9,
-      extra: { map: photoTexture(r.floor_material.texture_url, Math.max(2, w / 1.6), Math.max(2, d / 1.6)) } });
+      extra: { map: photoTexture(r.floor_material.texture_url, rx, ry) } });
   } else {
     floorMat = mat(kind ? '#FFFFFF' : r.floor_material.color, { roughness: 0.9 });
     if (kind) {
@@ -521,15 +677,24 @@ function buildRoom() {
       floorMat.map = tex;
     }
   }
+  withPhotoProjection(floorMat, projects(r.floor_material));
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.name = 'floor';
   scene3.add(floor);
   roomMeshes.floor = floor;
 
-  // Windows / doors / curtains
+  // Windows / doors / curtains / art / mirrors. They also take the photo
+  // projection, so from the photo's viewpoint they show the real thing.
   const features = new THREE.Group();
-  (r.features || []).forEach(f => features.add(buildFeature(f, r)));
+  (r.features || []).forEach(f => {
+    const g = buildFeature(f, r);
+    // ...until the user recolors the feature (then its own color shows)
+    if (sceneData.camera && f.type !== 'pendant' && f.photo_projection !== false) {
+      g.traverse(n => { if (n.isMesh) n.material = withPhotoProjection(n.material.clone(), projects(r.wall_material)); });
+    }
+    features.add(g);
+  });
   scene3.add(features);
   roomMeshes.features = features;
 
@@ -539,7 +704,8 @@ function buildRoom() {
   scene3.add(grid);
   roomMeshes.grid = grid;
 
-  controls.target.set(0, Math.min(1.0, h / 2.5), 0);
+  // Scenes with a photo camera orbit around the photo's view target instead
+  if (!sceneData.camera) controls.target.set(0, Math.min(1.0, h / 2.5), 0);
 }
 
 // ---------------- Procedural furniture builders ----------------
@@ -801,10 +967,33 @@ function buildObject(obj) {
     group.add(placeholder);
     gltfLoader.load(src, (gltf) => {
       const model = gltf.scene;
+      if (obj.asset?.canonical) {
+        // Upright, front on +Z (verified against the photo on the server):
+        // turn by the stored offset, then fit per axis — width and height
+        // follow the measurement (stretch capped at 2x), depth keeps the
+        // model's proportions within +-25% (mesh_alignment.fit_scale).
+        const turn = new THREE.Group();
+        turn.rotation.y = THREE.MathUtils.degToRad(obj.asset.yaw_offset_deg || 0);
+        turn.add(model);
+        turn.updateMatrixWorld(true);
+        const bb = new THREE.Box3().setFromObject(turn);
+        const size = bb.getSize(new THREE.Vector3());
+        const center = bb.getCenter(new THREE.Vector3());
+        turn.position.set(-center.x, -bb.min.y, -center.z);
+        const sx = dims[0] / Math.max(size.x, 1e-6);
+        const sy = THREE.MathUtils.clamp(dims[1] / Math.max(size.y, 1e-6), sx * 0.5, sx * 2.0);
+        const mean = Math.sqrt(sx * sy);
+        const fit = new THREE.Group();
+        fit.scale.set(sx, sy, THREE.MathUtils.clamp(dims[2] / Math.max(size.z, 1e-6), mean * 0.75, mean * 1.25));
+        fit.add(turn);
+        group.remove(placeholder);
+        group.add(fit);
+        return;
+      }
       const bb = new THREE.Box3().setFromObject(model);
       const size = bb.getSize(new THREE.Vector3());
-      // Generated meshes come back in arbitrary orientation, so match the
-      // mesh's LARGEST horizontal span to the object's largest footprint
+      // Legacy generated meshes come back in arbitrary orientation, so match
+      // the mesh's LARGEST horizontal span to the object's largest footprint
       // dimension. Only cap by height so weird meshes can't explode.
       const targetSpan = Math.max(dims[0], dims[2]);
       const meshSpan = Math.max(size.x, size.z);
@@ -874,6 +1063,7 @@ function select(sel) {
   deselect(false);
   selected = sel;
   addBtn.classList.add('hidden');
+  document.getElementById('viewBtn').classList.add('hidden');
   if (sel.type === 'object') {
     const group = objectGroups.get(sel.id);
     const obj = sceneData.objects.find(o => o.id === sel.id);
@@ -911,7 +1101,9 @@ function deselect(notify = true) {
   objPanel.classList.remove('visible');
   shellPanel.classList.remove('visible');
   addPanel.classList.remove('visible');
+  document.getElementById('view-panel').classList.remove('visible');
   addBtn.classList.remove('hidden');
+  document.getElementById('viewBtn').classList.remove('hidden');
   if (sceneData) setStatus(`${sceneData.room_type || 'Room'} · tap an item to edit`);
   if (notify) send('selection', { selected: null });
 }
@@ -1085,6 +1277,7 @@ document.getElementById('shell-color').addEventListener('change', (e) => {
     const f = (sceneData.room.features || []).find(x => x.id === selected.id);
     if (!f) return;
     f.color = e.target.value;
+    f.photo_projection = false; // show the chosen color, not the photo
     buildRoom();
     emitOp({ op: 'recolor', target: f.id, value: { color: e.target.value } });
     return;
@@ -1092,6 +1285,7 @@ document.getElementById('shell-color').addEventListener('change', (e) => {
   const key = selected.type === 'floor' ? 'floor_material' : 'wall_material';
   sceneData.room[key].color = e.target.value;
   sceneData.room[key].texture_url = null; // explicit recolor -> flat color
+  sceneData.room[key].photo_projection = false; // ...and no photo on it
   buildRoom();
   emitOp({ op: 'recolor', target: selected.type === 'floor' ? 'floor' : 'wall', value: { color: e.target.value } });
 });
@@ -1138,6 +1332,7 @@ document.getElementById('dupBtn').onclick = () => {
 addBtn.onclick = () => {
   deselect(false);
   addBtn.classList.add('hidden');
+  document.getElementById('viewBtn').classList.add('hidden');
   const list = document.getElementById('catalog-list');
   list.innerHTML = '';
   catalog.entries.forEach(entry => {
@@ -1169,19 +1364,51 @@ function addFromCatalog(entry) {
   select({ type: 'object', id: obj.id });
 }
 
+// Photo view panel
+const viewBtn = document.getElementById('viewBtn');
+const viewPanel = document.getElementById('view-panel');
+viewBtn.onclick = () => {
+  deselect(false);
+  addBtn.classList.add('hidden');
+  viewBtn.classList.add('hidden');
+  viewPanel.classList.add('visible');
+  goToPhotoView();
+};
+document.getElementById('viewDoneBtn').onclick = () => {
+  viewPanel.classList.remove('visible');
+  viewBtn.classList.remove('hidden');
+  deselect();
+};
+document.getElementById('photoViewBtn').onclick = () => goToPhotoView();
+document.getElementById('compareSlider').addEventListener('input', () => {
+  if (!photoView) goToPhotoView();
+  updateOverlay();
+});
+document.getElementById('projToggle').addEventListener('change', (e) => {
+  photoUniforms.photoStrength.value = e.target.checked ? 1.0 : 0.0;
+});
+
 // ---------------- Public API for Flutter ----------------
 window.RAI = {
-  loadScene(data, cat) {
+  // opts: { apiBase, token, sceneId } — lets the editor fetch the scene photo
+  loadScene(data, cat, opts) {
     sceneData = typeof data === 'string' ? JSON.parse(data) : data;
     if (cat) catalog = typeof cat === 'string' ? JSON.parse(cat) : cat;
+    if (opts) hostOpts = typeof opts === 'string' ? JSON.parse(opts) : opts;
     deselect(false);
     rebuildAll();
+    viewBtn.style.display = sceneData.camera ? 'block' : 'none';
+    // Open exactly where the photo was taken: the 3D room lines up with it
+    if (goToPhotoView()) setStatus('This is your photo in 3D — drag to look around');
+    updatePhotoMatrix();
+    loadPhoto();
   },
   // Push a fresh authoritative scene (after NL edit / undo) without losing the camera
   refreshScene(data) {
     sceneData = typeof data === 'string' ? JSON.parse(data) : data;
     deselect(false);
     rebuildAll();
+    updatePhotoMatrix();
   },
 };
 

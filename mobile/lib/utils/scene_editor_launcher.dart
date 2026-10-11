@@ -12,14 +12,16 @@ import '../screens/scene_editor_screen.dart';
 /// Mobile: pushes [SceneEditorScreen] (WebView + JS bridge).
 /// Web: flutter_inappwebview has no bridge support in browsers, so the
 /// editor opens in a new tab in standalone mode (?scene_id=&token=) and
-/// talks to the backend API directly.
+/// talks to the backend API directly. Browsers only allow that tab when it
+/// is opened from a user gesture, so on web call this directly from a tap
+/// handler — never after awaiting a long request (popup blockers).
 Future<void> openSceneEditor(BuildContext context, {String? sceneId}) async {
   if (kIsWeb) {
     final id = sceneId ?? context.read<SceneProvider>().sceneId;
     if (id == null) return;
     final token = context.read<AuthProvider>().token ?? '';
-    final url = Uri.parse(
-      '${ApiConfig.baseUrl}/editor?scene_id=$id&token=$token',
+    final url = Uri.parse('${ApiConfig.baseUrl}/editor').replace(
+      queryParameters: {'scene_id': id, 'token': token},
     );
     await launchUrl(url, webOnlyWindowName: '_blank');
     return;

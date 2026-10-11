@@ -2,12 +2,14 @@
 ReimagineAI - Rooms Router
 API endpoints for 3D room scanning and editing
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Form
 from fastapi.responses import FileResponse
 from typing import Optional
 from pydantic import BaseModel
+import json
 import os
 
+from ..deps import get_current_user, read_upload_limited
 from ..services.room_service import room_service
 from ..services.openai_service import openai_service
 
@@ -48,34 +50,28 @@ class RoomResponse(BaseModel):
 @router.post("/upload", response_model=RoomResponse)
 async def upload_room(
     file: UploadFile = File(...),
-    name: Optional[str] = Form(None)
+    name: Optional[str] = Form(None),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Upload a scanned room glTF/GLB model
-    
+
     - **file**: The 3D model file (GLB or glTF format)
     - **name**: Optional name for the room
     """
     # Validate file type
     allowed_extensions = ['.glb', '.gltf', '.obj']
     file_ext = os.path.splitext(file.filename)[1].lower() if file.filename else ''
-    
+
     if file_ext not in allowed_extensions:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}"
         )
-    
-    # Check file size (max 100MB)
-    max_size = 100 * 1024 * 1024  # 100MB
-    contents = await file.read()
-    if len(contents) > max_size:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File too large. Maximum size is {max_size // (1024*1024)}MB"
-        )
-    
-    # Reset file position
+
+    # Enforce settings.max_file_size (413) while reading at most limit + 1
+    # bytes, then rewind: room_service reads the now size-bounded file again.
+    await read_upload_limited(file)
     await file.seek(0)
     
     # Save room
@@ -92,7 +88,7 @@ async def upload_room(
 
 
 @router.get("/{room_id}", response_model=RoomResponse)
-async def get_room(room_id: str):
+async def get_room(room_id: str, current_user: dict = Depends(get_current_user)):
     """
     Get room details and metadata
     """
@@ -111,7 +107,7 @@ async def get_room(room_id: str):
 
 
 @router.get("/{room_id}/download")
-async def download_room(room_id: str):
+async def download_room(room_id: str, current_user: dict = Depends(get_current_user)):
     """
     Download the room 3D model file
     """
@@ -133,7 +129,7 @@ async def download_room(room_id: str):
 
 
 @router.get("")
-async def list_rooms():
+async def list_rooms(current_user: dict = Depends(get_current_user)):
     """
     List all saved rooms
     """
@@ -142,7 +138,7 @@ async def list_rooms():
 
 
 @router.delete("/{room_id}")
-async def delete_room(room_id: str):
+async def delete_room(room_id: str, current_user: dict = Depends(get_current_user)):
     """
     Delete a room and its model file
     """
@@ -155,7 +151,11 @@ async def delete_room(room_id: str):
 
 
 @router.post("/{room_id}/edit", response_model=EditResponse)
-async def edit_room(room_id: str, request: EditRequest):
+async def edit_room(
+    room_id: str,
+    request: EditRequest,
+    current_user: dict = Depends(get_current_user),
+):
     """
     AI-powered room edit via natural language
     
@@ -205,7 +205,11 @@ async def edit_room(room_id: str, request: EditRequest):
 
 
 @router.post("/{room_id}/generate-texture", response_model=TextureResponse)
-async def generate_texture(room_id: str, request: TextureRequest):
+async def generate_texture(
+    room_id: str,
+    request: TextureRequest,
+    current_user: dict = Depends(get_current_user),
+):
     """
     Generate a new texture using AI based on description
     
@@ -271,18 +275,29 @@ Return ONLY the JSON, no explanation."""
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"}
         )
-        
-        if response:
-            import json
-            return json.loads(response)
-        
-        return None
-        
+
+        edit = _valid_edit_command(json.loads(response) if response else None)
+        if edit:
+            return edit
+        print(f"[RoomsRouter] Unusable edit command from LLM: {str(response)[:200]}")
+
     except Exception as e:
         print(f"[RoomsRouter] Error parsing edit request: {e}")
-        
-        # Fallback: Simple keyword parsing
-        return _simple_parse_edit(message, selected_part)
+
+    # Fallback: Simple keyword parsing
+    return _simple_parse_edit(message, selected_part)
+
+
+def _valid_edit_command(edit) -> Optional[dict]:
+    """
+    Keep an LLM edit command only if it has non-empty string target/property/value
+    """
+    if not isinstance(edit, dict):
+        return None
+    command = {key: edit.get(key) for key in ('target', 'property', 'value')}
+    if not all(isinstance(v, str) and v.strip() for v in command.values()):
+        return None
+    return {key: v.strip() for key, v in command.items()}
 
 
 def _simple_parse_edit(message: str, selected_part: Optional[str] = None) -> Optional[dict]:

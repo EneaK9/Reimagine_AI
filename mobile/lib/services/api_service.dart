@@ -13,6 +13,10 @@ class ApiService {
   late final Dio _dio;
   String? _authToken;
 
+  /// Called when the backend rejects the current token (HTTP 401 on an
+  /// authenticated request). Set by [AuthProvider] to end the session.
+  void Function()? onUnauthorized;
+
   ApiService._internal() {
     _dio = Dio(BaseOptions(
       baseUrl: ApiConfig.baseUrl,
@@ -30,6 +34,30 @@ class ApiService {
       responseBody: true,
       logPrint: (obj) => print('[API] $obj'),
     ));
+
+    // A 401 on a call made with the current token means that token is no
+    // longer valid (expired, or replaced by a login on another device).
+    _dio.interceptors.add(InterceptorsWrapper(
+      onError: (error, handler) {
+        if (error.response?.statusCode == 401 &&
+            _sentWithCurrentToken(error.requestOptions)) {
+          onUnauthorized?.call();
+        }
+        handler.next(error);
+      },
+    ));
+  }
+
+  bool _sentWithCurrentToken(RequestOptions options) {
+    final token = _authToken;
+    if (token == null) return false;
+    const credentialEndpoints = [
+      ApiConfig.login,
+      ApiConfig.signup,
+      ApiConfig.logout,
+    ];
+    if (credentialEndpoints.contains(options.path)) return false;
+    return options.headers['Authorization'] == 'Bearer $token';
   }
 
   /// Set auth token for authenticated requests
@@ -108,12 +136,23 @@ class ApiService {
     setAuthToken(null);
   }
 
+  /// Current user for the stored token (used to validate a restored session)
+  Future<Map<String, dynamic>> getCurrentUser() async {
+    try {
+      final response = await _dio.get(ApiConfig.me);
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
   /// Send a chat message
   Future<ChatResponse> sendMessage({
     required String message,
     String? conversationId,
     String? imageBase64,
     String? meshId,  // Pass mesh_id so backend can edit the mesh
+    String? sceneId, // Links this editable 3D scene to the conversation
   }) async {
     try {
       final response = await _dio.post(
@@ -123,6 +162,7 @@ class ApiService {
           'conversation_id': conversationId,
           'image_base64': imageBase64,
           if (meshId != null) 'mesh_id': meshId,
+          if (sceneId != null) 'scene_id': sceneId,
         },
       );
 
@@ -138,12 +178,14 @@ class ApiService {
     required File imageFile,
     String? conversationId,
     String? meshId,  // Pass mesh_id so backend can edit the mesh
+    String? sceneId, // Links this editable 3D scene to the conversation
   }) async {
     try {
       final formData = FormData.fromMap({
         'message': message,
         'conversation_id': conversationId,
         if (meshId != null) 'mesh_id': meshId,
+        if (sceneId != null) 'scene_id': sceneId,
         'image': await _imageMultipart(imageFile),
       });
 
@@ -482,10 +524,13 @@ class ApiService {
           'Cannot connect to server. Make sure the backend is running.',
         );
       case DioExceptionType.badResponse:
-        final message = e.response?.data?['detail'] ?? 
-                        e.response?.data?['message'] ?? 
-                        'Server error occurred';
-        return ApiException(message);
+        final data = e.response?.data;
+        // FastAPI puts the reason in "detail" (a list for validation errors)
+        final detail = data is Map ? (data['detail'] ?? data['message']) : null;
+        return ApiException(
+          detail is String ? detail : detail?.toString() ?? 'Server error occurred',
+          statusCode: e.response?.statusCode,
+        );
       default:
         return ApiException('An unexpected error occurred: ${e.message}');
     }
@@ -495,7 +540,11 @@ class ApiService {
 /// API Exception
 class ApiException implements Exception {
   final String message;
-  ApiException(this.message);
+
+  /// HTTP status code when the server answered with an error response.
+  final int? statusCode;
+
+  ApiException(this.message, {this.statusCode});
 
   @override
   String toString() => message;

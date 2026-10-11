@@ -46,6 +46,17 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
+def check_database() -> bool:
+    """Run a trivial SELECT 1 (for /health). True if the database answers; never raises."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return True
+    except Exception as e:
+        print(f"[DB] Health check failed: {e}")
+        return False
+
+
 def init_db() -> None:
     """Create tables if they do not exist."""
     # Import models so metadata is registered

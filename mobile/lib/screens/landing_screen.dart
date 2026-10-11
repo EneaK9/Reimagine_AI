@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/auth_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/landing/sections/feature_section.dart';
 import '../widgets/landing/sections/footer_cta.dart';
@@ -9,6 +11,7 @@ import '../widgets/landing/sections/projects_section.dart';
 import '../widgets/landing/sections/services_heading.dart';
 import '../widgets/landing/sections/stats_section.dart';
 import '../widgets/landing/sections/vision_section.dart';
+import 'chat_screen.dart';
 import 'login_screen.dart';
 
 /// Marketing landing page — LUXE-style layout adapted for ReimagineAI.
@@ -36,9 +39,14 @@ class _LandingScreenState extends State<LandingScreen> {
     super.dispose();
   }
 
-  void _goToLogin() {
+  /// CTA target: sign-in, or straight to the studio when a saved session
+  /// was restored.
+  void _enterApp() {
+    final loggedIn = context.read<AuthProvider>().isLoggedIn;
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      MaterialPageRoute(
+        builder: (_) => loggedIn ? const ChatScreen() : const LoginScreen(),
+      ),
     );
   }
 
@@ -83,7 +91,7 @@ class _LandingScreenState extends State<LandingScreen> {
               key: _topKey,
               child: LandingNav(
                 onNavigate: _onNavigate,
-                onCta: _goToLogin,
+                onCta: _enterApp,
               ),
             ),
           ),
@@ -91,7 +99,7 @@ class _LandingScreenState extends State<LandingScreen> {
             child: KeyedSubtree(
               key: _aboutKey,
               child: HeroSection(
-                onTryApp: _goToLogin,
+                onTryApp: _enterApp,
                 onLearnMore: () => _scrollTo(_servicesKey),
               ),
             ),
@@ -108,7 +116,7 @@ class _LandingScreenState extends State<LandingScreen> {
           SliverToBoxAdapter(
             child: KeyedSubtree(
               key: _galleryKey,
-              child: ProjectsSection(onDetail: _goToLogin),
+              child: ProjectsSection(onDetail: _enterApp),
             ),
           ),
           const SliverToBoxAdapter(child: StatsSection()),
@@ -127,7 +135,7 @@ class _LandingScreenState extends State<LandingScreen> {
           SliverToBoxAdapter(
             child: KeyedSubtree(
               key: _footerKey,
-              child: FooterCta(onCollaborate: _goToLogin),
+              child: FooterCta(onCollaborate: _enterApp),
             ),
           ),
         ],

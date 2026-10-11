@@ -4,7 +4,9 @@ Handles all chat-related endpoints (PostgreSQL-backed, user-scoped).
 """
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from typing import Optional
+import asyncio
 import base64
+import re
 
 from sqlalchemy.orm import Session
 
@@ -18,8 +20,9 @@ from ..services.openai_service import openai_service
 from ..services.conversation_service import conversation_service
 from ..services.gemini_service import gemini_service
 from ..services.depth_service import depth_service
+from ..services.semantic_service import semantic_service
 from ..db.session import get_db
-from ..deps import get_current_user
+from ..deps import check_base64_size, get_current_user, read_upload_limited
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -40,6 +43,16 @@ async def _handle_chat(
         conversation_service.store_mesh_reference(
             db, conversation.id, request.mesh_id, user_id=user_id
         )
+
+    if request.scene_id:
+        # Link a 3D room the user built (e.g. from the scan screen) to this chat,
+        # only if it is theirs.
+        from ..services.scene_service import scene_service
+
+        if scene_service.get_scene(db, request.scene_id, user_id):
+            conversation_service.store_scene_reference(
+                db, conversation.id, request.scene_id, user_id=user_id
+            )
 
     image_to_edit = None
     is_follow_up = False
@@ -82,27 +95,53 @@ async def _handle_chat(
         db, conversation.id, user_id=user_id
     )
 
-    ai_response = await openai_service.chat_completion(
-        messages=context_messages,
-        image_base64=request.image_base64,
+    scene_id = conversation_service.get_scene_id(db, conversation.id, user_id=user_id)
+
+    # What does the user want? A typed judgment (TypeSafe, ~0.3 s) when
+    # configured, keyword rules otherwise — asked alongside the chat reply.
+    previous_assistant = next(
+        (m.get("content") for m in reversed(context_messages[:-1])
+         if isinstance(m, dict) and m.get("role") in ("assistant", MessageRole.ASSISTANT)),
+        None,
+    )
+    ai_response, route = await asyncio.gather(
+        openai_service.chat_completion(
+            messages=context_messages,
+            image_base64=request.image_base64,
+        ),
+        semantic_service.route_chat(
+            request.message,
+            previous_assistant if isinstance(previous_assistant, str) else None,
+            has_photo=image_to_edit is not None,
+            has_scene=bool(scene_id),
+        ),
+    )
+    confident = route is not None and route.intent_confidence >= 0.6
+    is_confirmation = (
+        route.intent == "confirm_suggestion" if confident else _is_affirmative(request.message)
     )
 
     generated_images = []
     image_error_note = None
     image_prompt = openai_service.extract_image_prompt(ai_response)
-    wants_edit = (
-        image_prompt
-        or _is_edit_request(request.message)
-        or (is_follow_up and _is_affirmative(request.message))
-    )
+    if confident:
+        # A plain question shouldn't trigger (and pay for) an image edit even
+        # when the assistant sketched an image prompt.
+        wants_edit = route.intent == "change_room" or (is_follow_up and is_confirmation)
+    else:
+        wants_edit = (
+            image_prompt
+            or _is_edit_request(request.message)
+            or (is_follow_up and is_confirmation)
+        )
 
     if image_to_edit and wants_edit:
         try:
             style = _extract_style_from_prompt(ai_response)
             edit_instruction = request.message
-            if _is_affirmative(request.message) and image_prompt:
+            if is_confirmation and image_prompt:
                 edit_instruction = image_prompt
-            elif _is_affirmative(request.message):
+            elif is_confirmation:
                 edit_instruction = (
                     _last_user_edit_request(context_messages) or request.message
                 )
@@ -127,14 +166,54 @@ async def _handle_chat(
                 f"I couldn’t update the image right now: {_friendly_image_error(img_error)}"
             )
 
+    # Notes go after the visible reply, never after the [IMAGE_PROMPT] block
+    # (which is cut off before the reply is shown).
+    reply, _, prompt_block = ai_response.partition("[IMAGE_PROMPT]")
+    reply = reply.strip()
+    notes: list[str] = []
     if image_error_note:
-        ai_response = f"{ai_response}\n\n⚠️ {image_error_note}"
+        notes.append(f"⚠️ {image_error_note}")
 
+    # If this conversation has an editable 3D scene, mirror the edit onto it
+    scene_updated = False
+    scene_instruction = None
+    from_proposal = False
+    if scene_id:
+        if confident:
+            if route.intent == "change_room" and route.scene_edit >= 0.5:
+                scene_instruction = request.message
+            elif route.intent == "confirm_suggestion":
+                # "yes, do it" applies what the assistant just proposed. Only
+                # on a confident judgment: keyword rules can't tell "ok
+                # thanks" from a confirmation.
+                proposal = (previous_assistant or "").partition("[IMAGE_PROMPT]")[0].strip()
+                if proposal:
+                    scene_instruction = f"Apply the change proposed here: {proposal}"
+                    from_proposal = True
+        elif _is_edit_request(request.message) and not is_confirmation:
+            scene_instruction = request.message
+    if scene_instruction:
+        try:
+            from ..services.scene_service import scene_service
+
+            # A proposal also names the current colors ("your light grey walls
+            # could be navy"): only the full parser reads that correctly
+            _, applied_ops, scene_message = await scene_service.nl_edit(
+                db, scene_id, scene_instruction, user_id=user_id, fast_paths=not from_proposal
+            )
+            if applied_ops:
+                scene_updated = True
+                notes.append(f"🛋️ {scene_message}")
+        except Exception as scene_error:
+            print(f"[Chat] Scene edit failed: {scene_error}")
+
+    clean_response = "\n\n".join([reply, *notes]) if notes else reply
+    stored = clean_response + (f"\n\n[IMAGE_PROMPT]{prompt_block}" if prompt_block else "")
     conversation_service.add_message(
         db,
         conversation.id,
         MessageRole.ASSISTANT,
-        ai_response,
+        stored,
         user_id=user_id,
     )
 
@@ -181,26 +260,6 @@ async def _handle_chat(
             mesh_id = existing_mesh_id
             mesh_url = f"/api/v1/depth/mesh/{mesh_id}"
 
-    # If this conversation has an editable 3D scene, mirror the edit onto it
-    scene_id = conversation_service.get_scene_id(db, conversation.id, user_id=user_id)
-    scene_updated = False
-    if scene_id and _is_edit_request(request.message) and not _is_affirmative(request.message):
-        try:
-            from ..services.scene_service import scene_service
-
-            _, applied_ops, scene_message = await scene_service.nl_edit(
-                db, scene_id, request.message, user_id=user_id
-            )
-            if applied_ops:
-                scene_updated = True
-                ai_response = f"{ai_response}\n\n🛋️ {scene_message}"
-        except Exception as scene_error:
-            print(f"[Chat] Scene edit failed: {scene_error}")
-
-    clean_response = ai_response
-    if "[IMAGE_PROMPT]" in clean_response:
-        clean_response = clean_response.split("[IMAGE_PROMPT]")[0].strip()
-
     return ChatResponse(
         conversation_id=conversation.id,
         message=clean_response,
@@ -220,13 +279,16 @@ async def send_message(
     current_user: dict = Depends(get_current_user),
 ):
     """Send a message to the AI assistant (requires auth)."""
+    check_base64_size(request.image_base64)
     try:
         return await _handle_chat(request, db, current_user)
-    except Exception as e:
+    except HTTPException:
+        raise
+    except Exception:
         import traceback
 
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Chat failed. Please try again.")
 
 
 @router.post("/with-image", response_model=ChatResponse)
@@ -234,23 +296,30 @@ async def send_message_with_image(
     message: str = Form(...),
     conversation_id: Optional[str] = Form(None),
     mesh_id: Optional[str] = Form(None),
+    scene_id: Optional[str] = Form(None),
     image: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """Send a message with an uploaded image file (requires auth)."""
+    image_content = await read_upload_limited(image)
     try:
-        image_content = await image.read()
         image_base64 = base64.b64encode(image_content).decode("utf-8")
         request = ChatRequest(
             message=message,
             conversation_id=conversation_id,
             image_base64=image_base64,
             mesh_id=mesh_id,
+            scene_id=scene_id,
         )
         return await _handle_chat(request, db, current_user)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Chat failed. Please try again.")
 
 
 @router.get("/conversations")
@@ -303,15 +372,17 @@ async def delete_conversation(
     return {"status": "deleted", "conversation_id": conversation_id}
 
 
+_EDIT_WORDS = re.compile(
+    r"\b(change|make|turn|convert|switch|update|paint|colou?r|recolou?r|replace|add|"
+    r"remove|delete|move|rotate|swap|walls?|floors?|ceiling|furniture|beds?|sofas?|"
+    r"couch|lighter|darker|brighter|warmer|cooler|style)\b"
+)
+
+
 def _is_edit_request(message: str) -> bool:
-    edit_keywords = [
-        "change", "make", "turn", "convert", "switch", "update",
-        "paint", "color", "replace", "add", "remove", "move",
-        "walls", "wall", "floor", "ceiling", "furniture", "bed", "sofa",
-        "light", "dark", "bright", "warm", "cool", "style", "background",
-    ]
-    message_lower = message.lower()
-    return any(keyword in message_lower for keyword in edit_keywords)
+    """Keyword fallback when no typed judgment is available (whole words
+    only: "bedroom" is not "bed", "address" is not "add")."""
+    return bool(_EDIT_WORDS.search(message.lower()))
 
 
 def _is_affirmative(message: str) -> bool:

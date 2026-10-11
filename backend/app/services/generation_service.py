@@ -13,17 +13,26 @@ from __future__ import annotations
 import base64
 import os
 import uuid
+from dataclasses import dataclass
 from io import BytesIO
 from typing import Optional
 
 import httpx
+import numpy as np
 from PIL import Image
 
 from ..config import get_settings
 
 settings = get_settings()
 
-GENERATION_TIMEOUT_S = 240  # TRELLIS runs ~20-60s; leave headroom for queueing
+GENERATION_TIMEOUT_S = 420  # queue wait + TRELLIS.2 (~20-60 s) + GLB baking
+
+
+@dataclass
+class GeneratedMesh:
+    url: str                           # API-relative URL of the stored GLB
+    path: str                          # local file path
+    alpha: Optional[np.ndarray] = None  # object mask in original crop pixels (for alignment)
 
 
 class GenerationService:
@@ -166,10 +175,107 @@ class GenerationService:
             print(f"[Gen3D] Gemini isolation failed for '{label}': {e}")
         return None
 
-    async def image_to_glb(self, image: Image.Image, label: str = "") -> Optional[str]:
+    def _request_body(self, data_uri: str) -> dict:
+        body = {"image_url": data_uri}
+        if "trellis-2" in settings.image_to_3d_model:
+            # fal's defaults (500k faces, 2K textures) give ~18 MB GLBs, 93% of
+            # it geometry. TRELLIS.2 simplifies *before* baking textures, so a
+            # lower face budget stays clean and loads fast on phones.
+            texture = min((1024, 2048, 4096), key=lambda v: abs(v - int(settings.image_to_3d_texture)))
+            body.update({
+                "resolution": 1024,
+                "decimation_target": int(min(2_000_000, max(5_000, settings.image_to_3d_faces))),
+                "texture_size": texture,  # fal accepts 1024 / 2048 / 4096 only
+            })
+        return body
+
+    @staticmethod
+    def _mesh_url(result: dict) -> Optional[str]:
+        """GLB URL from a fal result (keys differ between 3D models)."""
+        candidates = [result.get("model_glb"), (result.get("model_urls") or {}).get("glb"),
+                      result.get("model_mesh"), result.get("glb"), result.get("mesh")]
+        for entry in candidates:
+            if isinstance(entry, dict) and entry.get("url"):
+                return entry["url"]
+            if isinstance(entry, str) and entry.startswith("http"):
+                return entry
+        return None
+
+    async def _run_fal(self, client: httpx.AsyncClient, body: dict, label: str) -> Optional[dict]:
         """
-        Generate a textured GLB from a furniture crop.
-        Returns the API-relative URL of the stored GLB, or None on failure.
+        fal queue API: submit, poll the status URL, fetch the result. Unlike
+        a single synchronous call, a dropped connection doesn't lose the job.
+        """
+        import asyncio
+        import time
+
+        headers = {"Authorization": f"Key {settings.fal_api_key}"}
+        submit = None
+        for attempt in range(3):
+            submit = await client.post(
+                f"https://queue.fal.run/{settings.image_to_3d_model}", headers=headers, json=body,
+            )
+            if submit.status_code in (403, 429) and attempt < 2:
+                wait = 10 * (attempt + 1)  # concurrency / rate limit
+                print(f"[Gen3D] fal returned {submit.status_code} for '{label}'; retrying in {wait}s")
+                await asyncio.sleep(wait)
+                continue
+            break
+        if submit.status_code >= 400:
+            print(f"[Gen3D] fal submit error {submit.status_code} for '{label}': {submit.text[:300]}")
+            return None
+        job = submit.json()
+        status_url, response_url = job.get("status_url"), job.get("response_url")
+        if not status_url or not response_url:
+            return job if self._mesh_url(job) else None  # synchronous-style answer
+
+        deadline = time.monotonic() + GENERATION_TIMEOUT_S
+        delay = 2.0
+        server_errors = 0
+        while time.monotonic() < deadline:
+            await asyncio.sleep(delay)
+            delay = min(delay * 1.4, 8.0)
+            try:
+                status = await client.get(status_url, headers=headers)
+            except httpx.HTTPError as e:
+                print(f"[Gen3D] status poll failed for '{label}' ({e!r}); retrying")
+                continue
+            if status.status_code == 429 or status.status_code >= 500:
+                server_errors += 1
+                if server_errors <= 5:
+                    continue  # transient
+            if status.status_code >= 400:
+                print(f"[Gen3D] fal status error {status.status_code} for '{label}': {status.text[:200]}")
+                await self._cancel(client, job, headers)
+                return None
+            state = status.json().get("status")
+            if state == "COMPLETED":
+                result = await client.get(response_url, headers=headers)
+                if result.status_code >= 400:
+                    print(f"[Gen3D] fal result error {result.status_code} for '{label}': {result.text[:300]}")
+                    return None
+                return result.json()
+            if state not in ("IN_QUEUE", "IN_PROGRESS"):
+                print(f"[Gen3D] fal job for '{label}' ended with status {state}")
+                return None
+        print(f"[Gen3D] fal job for '{label}' timed out after {GENERATION_TIMEOUT_S}s")
+        await self._cancel(client, job, headers)  # stop paying for a result nobody waits for
+        return None
+
+    @staticmethod
+    async def _cancel(client: httpx.AsyncClient, job: dict, headers: dict) -> None:
+        url = job.get("cancel_url")
+        if not url:
+            return
+        try:
+            await client.put(url, headers=headers)
+        except httpx.HTTPError:
+            pass
+
+    async def image_to_glb(self, image: Image.Image, label: str = "") -> Optional[GeneratedMesh]:
+        """
+        Generate a textured GLB from a furniture crop. Returns the stored mesh
+        (plus the object's cut-out mask for alignment), or None on failure.
         """
         if not self.enabled:
             return None
@@ -182,6 +288,10 @@ class GenerationService:
 
         # Background removal is CPU-bound; keep it off the event loop
         cut = await asyncio.to_thread(self._remove_background, prepared, label)
+        alpha = None
+        if cut is not None and cut.mode == "RGBA":
+            # Mask back in the original crop's pixels (prepared may be upscaled)
+            alpha = np.asarray(cut.getchannel("A").resize(image.size, Image.Resampling.BILINEAR)) > 127
         if cut is None:
             # Segmentation failed (occluded / dark-on-dark): have Gemini
             # redraw the object clean on white, then generate from that.
@@ -199,50 +309,26 @@ class GenerationService:
             data_uri = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
         try:
-            async with httpx.AsyncClient(timeout=GENERATION_TIMEOUT_S) as client:
-                response = None
-                for attempt in range(3):
-                    response = await client.post(
-                        f"https://fal.run/{settings.image_to_3d_model}",
-                        headers={"Authorization": f"Key {settings.fal_api_key}"},
-                        json={"image_url": data_uri},
-                    )
-                    if response.status_code in (403, 429) and attempt < 2:
-                        # Concurrency/rate limit — back off and retry
-                        wait = 10 * (attempt + 1)
-                        print(f"[Gen3D] fal returned {response.status_code} for "
-                              f"'{label}' ({response.text[:150]}); retrying in {wait}s")
-                        await asyncio.sleep(wait)
-                        continue
-                    break
-                if response.status_code >= 400:
-                    print(f"[Gen3D] fal error {response.status_code} for '{label}': "
-                          f"{response.text[:300]}")
+            async with httpx.AsyncClient(timeout=60) as client:
+                result = await self._run_fal(client, self._request_body(data_uri), label)
+                if not result:
                     return None
-                result = response.json()
-
-                # fal model outputs vary slightly; check the common keys
-                mesh_url = None
-                for key in ("model_mesh", "model_glb", "mesh", "glb"):
-                    entry = result.get(key)
-                    if isinstance(entry, dict) and entry.get("url"):
-                        mesh_url = entry["url"]
-                        break
-                    if isinstance(entry, str) and entry.startswith("http"):
-                        mesh_url = entry
-                        break
+                mesh_url = self._mesh_url(result)
                 if not mesh_url:
                     print(f"[Gen3D] No mesh URL in response for '{label}': {list(result.keys())}")
                     return None
-
-                glb = await client.get(mesh_url)
+                glb = await client.get(mesh_url, timeout=120)
                 glb.raise_for_status()
+            if not glb.content.startswith(b"glTF"):
+                print(f"[Gen3D] Result for '{label}' is not a GLB file — ignoring")
+                return None
 
             filename = f"gen_{uuid.uuid4().hex[:12]}.glb"
-            with open(os.path.join(self.generated_dir, filename), "wb") as f:
+            path = os.path.join(self.generated_dir, filename)
+            with open(path, "wb") as f:
                 f.write(glb.content)
             print(f"[Gen3D] Generated {filename} for '{label}' ({len(glb.content)//1024} KB)")
-            return f"/api/v1/scenes/assets/{filename}"
+            return GeneratedMesh(url=f"/api/v1/scenes/assets/{filename}", path=path, alpha=alpha)
 
         except Exception as e:
             print(f"[Gen3D] Generation failed for '{label}': {e!r}")

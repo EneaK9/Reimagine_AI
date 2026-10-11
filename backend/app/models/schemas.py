@@ -42,7 +42,8 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     image_base64: Optional[str] = None  # Base64 encoded image
     mesh_id: Optional[str] = None  # ID of 3D mesh to edit
-    
+    scene_id: Optional[str] = None  # editable 3D scene to link to this conversation
+
     class Config:
         json_schema_extra = {
             "example": {

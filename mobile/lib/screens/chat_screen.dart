@@ -16,7 +16,11 @@ import '../utils/scene_editor_launcher.dart';
 /// Design studio — mobile uses a compact drawer layout; web uses a
 /// desktop shell with a persistent sidebar and a distinct home canvas.
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  /// Start a fresh conversation when the screen opens. Pass false to keep
+  /// the conversation (and 3D room) already set up on [ChatProvider].
+  final bool resetConversation;
+
+  const ChatScreen({super.key, this.resetConversation = true});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -47,9 +51,11 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<ChatProvider>().startNewConversation();
-    });
+    if (widget.resetConversation) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        context.read<ChatProvider>().startNewConversation();
+      });
+    }
   }
 
   @override
@@ -108,6 +114,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildMobileAppBar() {
+    final chat = context.watch<ChatProvider>();
     return Container(
       height: 56,
       padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -142,11 +149,18 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
           ),
-          if (context.watch<ChatProvider>().hasScene) ...[
+          if (chat.hasScene) ...[
             _IconBtn(
               icon: Icons.chair_rounded,
               tooltip: 'Open 3D room',
               onTap: _openSceneEditor,
+            ),
+            const SizedBox(width: 8),
+          ] else if (chat.messages.isNotEmpty) ...[
+            _IconBtn(
+              icon: Icons.view_in_ar_outlined,
+              tooltip: 'Scan room in 3D',
+              onTap: _openRoomScan,
             ),
             const SizedBox(width: 8),
           ],
@@ -160,10 +174,20 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  /// Runs directly from a tap: on web the editor opens in a new tab, which
+  /// popup blockers only allow from a user gesture.
   void _openSceneEditor() {
     final sceneId = context.read<ChatProvider>().currentSceneId;
     if (sceneId == null) return;
     openSceneEditor(context, sceneId: sceneId);
+  }
+
+  /// Scan the room in 3D; the new room is linked to the current conversation.
+  void _openRoomScan() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const RoomScanScreen()),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -199,6 +223,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildWebTopBar() {
+    final chat = context.watch<ChatProvider>();
     return Container(
       height: 64,
       padding: const EdgeInsets.symmetric(horizontal: 28),
@@ -241,6 +266,21 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
           const SizedBox(width: 16),
+          if (chat.hasScene) ...[
+            _TopBarAction(
+              icon: Icons.chair_rounded,
+              label: 'Open 3D room',
+              onPressed: _openSceneEditor,
+            ),
+            const SizedBox(width: 8),
+          ] else if (chat.messages.isNotEmpty) ...[
+            _TopBarAction(
+              icon: Icons.view_in_ar_outlined,
+              label: 'Scan room in 3D',
+              onPressed: _openRoomScan,
+            ),
+            const SizedBox(width: 8),
+          ],
           TextButton(
             onPressed: () =>
                 context.read<ChatProvider>().startNewConversation(),
@@ -365,15 +405,10 @@ class _ChatScreenState extends State<ChatScreen> {
           _QuickAction(
             icon: Icons.view_in_ar_outlined,
             title: '3D room scan',
-            subtitle: 'Depth mesh from a photo',
+            subtitle: 'Editable 3D room from a photo',
             accent: true,
             badge: 'NEW',
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const RoomScanScreen()),
-              );
-            },
+            onTap: _openRoomScan,
           ),
           const SizedBox(height: 18),
           Text(
@@ -511,17 +546,10 @@ class _ChatScreenState extends State<ChatScreen> {
                               Expanded(
                                 child: _WebHeroAction(
                                   title: '3D room scan',
-                                  subtitle: 'Photo → depth mesh',
+                                  subtitle: 'Photo → editable 3D room',
                                   icon: Icons.view_in_ar_outlined,
                                   filled: true,
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => const RoomScanScreen(),
-                                      ),
-                                    );
-                                  },
+                                  onTap: _openRoomScan,
                                 ),
                               ),
                               const SizedBox(width: 12),
@@ -654,6 +682,40 @@ class _ChatScreenState extends State<ChatScreen> {
 }
 
 // --- shared small widgets ---
+
+/// Outlined text action for the web top bar.
+class _TopBarAction extends StatelessWidget {
+  const _TopBarAction({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 16),
+      label: Text(
+        label,
+        style: GoogleFonts.interTight(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppTheme.ink,
+        side: const BorderSide(color: AppTheme.border),
+        shape: const RoundedRectangleBorder(),
+        overlayColor: Colors.transparent,
+      ),
+    );
+  }
+}
 
 class _IconBtn extends StatelessWidget {
   const _IconBtn({

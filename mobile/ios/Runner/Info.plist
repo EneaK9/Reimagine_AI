@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>ReimagineAI uses the camera to photograph your room so it can build an editable 3D model and redesign ideas.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>ReimagineAI needs access to your photos so you can choose a picture of your room to redesign.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

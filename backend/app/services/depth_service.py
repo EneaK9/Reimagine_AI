@@ -5,10 +5,22 @@ Uses MiDaS for monocular depth estimation and Open3D for mesh generation
 import os
 import uuid
 import base64
+import threading
 from io import BytesIO
 from typing import Optional, Tuple
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
+
+# Scene geometry model: MoGe-2 (Microsoft, MIT) predicts metric depth AND the
+# camera's field of view from one photo — ~1 s on CPU for the small variant.
+# Set GEOMETRY_MODEL=Ruicheng/moge-2-vitl-normal for the larger, more accurate one.
+GEOMETRY_MODEL = os.environ.get("GEOMETRY_MODEL", "Ruicheng/moge-2-vits-normal")
+GEOMETRY_RESOLUTION_LEVEL = int(os.environ.get("GEOMETRY_RESOLUTION_LEVEL", "3"))
+# Fallback when MoGe is not installed: metric depth without intrinsics
+# (Apache-2.0, ~25M params); the FOV is then self-calibrated from the room.
+METRIC_DEPTH_MODEL = os.environ.get(
+    "METRIC_DEPTH_MODEL", "depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf"
+)
 
 # These imports are conditionally loaded to avoid startup errors
 # if dependencies aren't installed yet
@@ -45,6 +57,12 @@ class DepthService:
         self._initialized = False
         self._da2_pipe = None  # Depth Anything V2 (optional upgrade)
         self._da2_failed = False
+        self._metric_pipe = None  # Depth Anything V2 metric (geometry fallback)
+        self._moge = None         # MoGe-2 (primary scene geometry)
+        self._moge_failed = False
+        self._metric_lock = threading.Lock()
+        # MiDaS (legacy 2.5D preview): lazy init + inference aren't thread-safe
+        self._midas_lock = threading.RLock()
         
         # Storage paths
         self.data_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'data')
@@ -87,13 +105,120 @@ class DepthService:
         print("MiDaS model loaded successfully!")
     
     def _decode_base64_image(self, image_base64: str) -> Image.Image:
-        """Decode a base64 string to PIL Image."""
-        # Handle data URL format
+        """Decode a base64 string to an upright RGB PIL Image."""
+        return self.decode_photo(image_base64)[0]
+
+    def decode_photo(self, image_base64: str) -> Tuple[Image.Image, Optional[float]]:
+        """
+        Decode a base64 photo, applying its EXIF orientation (phone photos are
+        often stored sideways) and reading the lens FOV from EXIF when present.
+        Returns (upright RGB image, horizontal FOV in degrees or None).
+        """
+        import math
+
+        from .room_geometry import hfov_from_exif
+
         if image_base64.startswith('data:'):
             image_base64 = image_base64.split(',')[1]
-        
-        image_data = base64.b64decode(image_base64)
-        return Image.open(BytesIO(image_data)).convert('RGB')
+        raw = Image.open(BytesIO(base64.b64decode(image_base64)))
+        try:
+            upright = ImageOps.exif_transpose(raw)
+        except Exception:
+            upright = raw
+        hfov = hfov_from_exif(raw)
+        if hfov is not None and upright.size != raw.size:
+            # Rotated by 90 degrees: the FOV now spans the other image side
+            w, h = raw.size
+            f_px = (w / 2) / math.tan(math.radians(hfov) / 2)
+            hfov = math.degrees(2 * math.atan((h / 2) / f_px))
+        return upright.convert('RGB'), hfov
+
+    def metric_depth(
+        self,
+        image: Image.Image,
+        fov_hint: Optional[float] = None,
+        max_size: int = 1024,
+    ) -> Tuple[np.ndarray, Optional[float], str]:
+        """
+        Metric depth for scene geometry.
+
+        Returns (depth in meters as planar Z at the image's aspect ratio,
+        horizontal FOV in degrees or None if the model can't tell, model tag).
+        fov_hint (e.g. from EXIF) is passed to MoGe so depth uses the true lens.
+        Thread-safe: callers run it via asyncio.to_thread so the event loop
+        stays free; inference is serialized to bound CPU/RAM on the server.
+        """
+        if not _torch_available:
+            raise RuntimeError("PyTorch is not installed")
+        w, h = image.size
+        if max(w, h) > max_size:
+            s = max_size / max(w, h)
+            image = image.resize((max(1, int(w * s)), max(1, int(h * s))), Image.Resampling.LANCZOS)
+        with self._metric_lock:
+            if not self._moge_failed:
+                try:
+                    if self._moge is None:
+                        from moge.model.v2 import MoGeModel
+
+                        print(f"[Depth] Loading geometry model {GEOMETRY_MODEL}...")
+                        self._moge = MoGeModel.from_pretrained(GEOMETRY_MODEL).eval()
+                        print("[Depth] Geometry model loaded")
+                except Exception as e:
+                    # Not installed / can't load: stop retrying for this process
+                    self._moge_failed = True
+                    print(f"[Depth] MoGe-2 unavailable ({e}); using Depth Anything V2 metric")
+            if self._moge is not None:
+                try:
+                    return self._moge_depth(image, fov_hint)
+                except Exception as e:
+                    # A one-off inference failure: fall back for this photo only
+                    print(f"[Depth] MoGe-2 failed on this photo ({e}); using Depth Anything V2 metric")
+            return self._da2_metric_depth(image), None, "depth-anything-v2-metric"
+
+    def _moge_depth(self, image: Image.Image, fov_hint: Optional[float]) -> Tuple[np.ndarray, float, str]:
+        import math
+
+        x = torch.tensor(np.asarray(image, dtype=np.float32) / 255.0).permute(2, 0, 1)
+        with torch.no_grad():
+            out = self._moge.infer(
+                x, resolution_level=GEOMETRY_RESOLUTION_LEVEL, fov_x=fov_hint, use_fp16=False,
+            )
+        depth = out["depth"].float().cpu().numpy()
+        mask = out["mask"].cpu().numpy().astype(bool) & np.isfinite(depth)
+        depth = np.where(mask, depth, 0.0).astype(np.float32)
+        fx_norm = float(out["intrinsics"][0, 0])  # normalized: fx_px = fx * width
+        hfov = math.degrees(2 * math.atan(0.5 / fx_norm))
+        return depth, hfov, "moge-2"
+
+    def _da2_metric_depth(self, image: Image.Image) -> np.ndarray:
+        if self._metric_pipe is None:
+            from transformers import pipeline as hf_pipeline
+
+            print(f"[Depth] Loading metric depth model {METRIC_DEPTH_MODEL}...")
+            self._metric_pipe = hf_pipeline(
+                "depth-estimation",
+                model=METRIC_DEPTH_MODEL,
+                device=0 if torch.cuda.is_available() else -1,
+            )
+            print("[Depth] Metric depth model loaded")
+        result = self._metric_pipe(image)
+        depth = result["predicted_depth"]
+        if hasattr(depth, "numpy"):
+            depth = depth.squeeze().float().cpu().numpy()
+        depth = np.asarray(depth, dtype=np.float32)
+        if depth.shape != (image.height, image.width):
+            depth = np.asarray(
+                Image.fromarray(depth).resize((image.width, image.height), Image.Resampling.BILINEAR),
+                dtype=np.float32,
+            )
+        return depth
+
+    def warm_up(self) -> None:
+        """Load the scene geometry model ahead of the first scene request."""
+        try:
+            self.metric_depth(Image.new("RGB", (64, 48), (128, 128, 128)))
+        except Exception as e:
+            print(f"[Depth] Warm-up skipped: {e}")
     
     def _encode_image_base64(self, image: Image.Image, format: str = 'PNG') -> str:
         """Encode PIL Image to base64 string."""
@@ -112,6 +237,10 @@ class DepthService:
         Returns:
             Tuple of (depth_array, original_image)
         """
+        with self._midas_lock:
+            return self._generate_depth_map_locked(image_base64, max_size)
+
+    def _generate_depth_map_locked(self, image_base64: str, max_size: int) -> Tuple[np.ndarray, Image.Image]:
         self._ensure_initialized()
         
         # Decode image
@@ -350,11 +479,20 @@ class DepthService:
     
     async def generate_mesh_from_image(self, image_base64: str) -> dict:
         """
+        Complete pipeline: image -> depth map -> 3D mesh, run on a worker
+        thread (it is CPU-bound and would block the event loop for seconds).
+        """
+        import asyncio
+
+        return await asyncio.to_thread(self.generate_mesh_blocking, image_base64)
+
+    def generate_mesh_blocking(self, image_base64: str) -> dict:
+        """
         Complete pipeline: image -> depth map -> 3D mesh.
-        
+
         Args:
             image_base64: Base64 encoded room photo
-            
+
         Returns:
             Dictionary with mesh_id, mesh_url, and depth_map_url
         """

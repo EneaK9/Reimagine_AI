@@ -1,6 +1,10 @@
 """
 ReimagineAI - Gemini Image Service
 Uses Google's Gemini API for room redesign (text-and-image-to-image)
+
+Calls go through the SDK's async client (client.aio) so a 10-60 s image
+generation never blocks the event loop of the single uvicorn worker.
+self.client stays the sync client for callers that use it directly.
 """
 import base64
 import asyncio
@@ -40,7 +44,25 @@ class GeminiImageService:
         "coastal": "coastal design with light blues and whites, natural textures, beach-inspired, airy and bright",
         "art_deco": "art deco style with geometric patterns, bold colors, gold accents, glamorous 1920s feel",
     }
-    
+
+    # Pause before retrying an edit that came back without an image
+    NO_IMAGE_RETRY_DELAYS = (1.5, 3.0)
+
+    @staticmethod
+    def _first_image_data_url(response) -> Optional[str]:
+        """First inline image of a Gemini response as a data URL, or None (text-only/blocked reply)."""
+        candidates = getattr(response, "candidates", None) or []
+        if not candidates:
+            return None
+        content = getattr(candidates[0], "content", None)
+        for part in getattr(content, "parts", None) or []:
+            inline = getattr(part, "inline_data", None)
+            if inline is not None and inline.data:
+                img_base64 = base64.b64encode(inline.data).decode('utf-8')
+                mime_type = inline.mime_type or "image/png"
+                return f"data:{mime_type};base64,{img_base64}"
+        return None
+
     async def redesign_room(
         self,
         image_base64: str,
@@ -90,24 +112,20 @@ Make it look like a professional interior design magazine photo."""
                     print(f"Generating image {i+1}/{max_images} with model: {self.model}")
                     
                     # Call Gemini with image editing
-                    response = self.client.models.generate_content(
+                    response = await self.client.aio.models.generate_content(
                         model=self.model,  # Use model from settings
                         contents=[prompt, image_part],
                         config=types.GenerateContentConfig(
                             response_modalities=["TEXT", "IMAGE"],
                         )
                     )
-                    
+
                     # Extract generated image from response
-                    for part in response.candidates[0].content.parts:
-                        if part.inline_data is not None:
-                            img_base64 = base64.b64encode(part.inline_data.data).decode('utf-8')
-                            mime_type = part.inline_data.mime_type or "image/png"
-                            data_url = f"data:{mime_type};base64,{img_base64}"
-                            results.append(data_url)
-                            print(f"✓ Generated image {i+1}")
-                            break
-                    
+                    data_url = self._first_image_data_url(response)
+                    if data_url:
+                        results.append(data_url)
+                        print(f"✓ Generated image {i+1}")
+
                     # Wait between requests to avoid rate limits
                     if i < max_images - 1:
                         await asyncio.sleep(2)
@@ -157,23 +175,19 @@ natural lighting, architectural digest style, warm and inviting atmosphere."""
                 try:
                     print(f"Generating image {i+1}/{max_images} with model: {self.model}")
                     
-                    response = self.client.models.generate_content(
+                    response = await self.client.aio.models.generate_content(
                         model=self.model,
                         contents=[full_prompt],
                         config=types.GenerateContentConfig(
                             response_modalities=["TEXT", "IMAGE"],
                         )
                     )
-                    
-                    for part in response.candidates[0].content.parts:
-                        if part.inline_data is not None:
-                            img_base64 = base64.b64encode(part.inline_data.data).decode('utf-8')
-                            mime_type = part.inline_data.mime_type or "image/png"
-                            data_url = f"data:{mime_type};base64,{img_base64}"
-                            results.append(data_url)
-                            print(f"✓ Generated image {i+1}")
-                            break
-                    
+
+                    data_url = self._first_image_data_url(response)
+                    if data_url:
+                        results.append(data_url)
+                        print(f"✓ Generated image {i+1}")
+
                     if i < max_images - 1:
                         await asyncio.sleep(2)
                             
@@ -245,28 +259,28 @@ Make the edit now."""
                     print(f"Using model: {self.model}" + (f" (attempt {attempt + 1}/{max_retries})" if attempt > 0 else ""))
                     
                     # Call Gemini with precise edit instruction
-                    response = self.client.models.generate_content(
+                    response = await self.client.aio.models.generate_content(
                         model=self.model,
                         contents=[prompt, image_part],
                         config=types.GenerateContentConfig(
                             response_modalities=["TEXT", "IMAGE"],
                         )
                     )
-                    
+
                     # Extract generated image from response
-                    for part in response.candidates[0].content.parts:
-                        if part.inline_data is not None:
-                            img_base64 = base64.b64encode(part.inline_data.data).decode('utf-8')
-                            mime_type = part.inline_data.mime_type or "image/png"
-                            data_url = f"data:{mime_type};base64,{img_base64}"
-                            results.append(data_url)
-                            print(f"✓ Generated edited image")
-                            break
-                    
-                    # Success - break out of retry loop
-                    if results:
-                        break
-                        
+                    data_url = self._first_image_data_url(response)
+                    if data_url:
+                        results.append(data_url)
+                        print(f"✓ Generated edited image")
+                        break  # Success - stop retrying
+
+                    # No image (text-only or blocked reply): back off, then retry
+                    if attempt < max_retries - 1:
+                        delays = self.NO_IMAGE_RETRY_DELAYS
+                        wait_time = delays[min(attempt, len(delays) - 1)]
+                        print(f"[Gemini] No image in response, retrying in {wait_time}s... (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(wait_time)
+
                 except Exception as e:
                     error_str = str(e)
                     # Quota / billing — surface immediately (retries will not help)

@@ -17,9 +17,21 @@ class ChatProvider with ChangeNotifier {
   String? _currentMeshId;   // Mesh ID for editing the mesh
   String? _currentSceneId;  // Editable 3D scene attached to this conversation
   bool _sceneJustUpdated = false; // Last message changed the 3D scene
+  bool _conversationPersisted = false; // Current conversation exists on the backend
+  int _conversationGeneration = 0; // Bumped when another conversation becomes current
 
   // Getters
   Conversation? get currentConversation => _currentConversation;
+
+  /// ID of the current conversation if it exists on the backend (loaded from
+  /// history, or a message has round-tripped). Null for a local draft.
+  String? get persistedConversationId =>
+      _conversationPersisted ? _currentConversation?.id : null;
+
+  /// Changes whenever a different conversation becomes current (new, loaded
+  /// or deleted). Unlike the id, it survives a draft getting its server id.
+  int get conversationGeneration => _conversationGeneration;
+
   List<Message> get messages => _currentConversation?.messages ?? [];
   List<ConversationSummary> get conversations => _conversations;
   bool get isLoading => _isLoading;
@@ -42,6 +54,8 @@ class ChatProvider with ChangeNotifier {
   /// Start a new conversation
   void startNewConversation() {
     _currentConversation = Conversation.create();
+    _conversationPersisted = false;
+    _conversationGeneration++;
     _currentMeshUrl = null;  // Clear mesh when starting new conversation
     _currentMeshId = null;   // Clear mesh ID too
     _currentSceneId = null;
@@ -93,6 +107,7 @@ class ChatProvider with ChangeNotifier {
     if (content.trim().isEmpty && _selectedImage == null) return;
 
     _error = null;
+    final generation = _conversationGeneration;
     
     // Create conversation if needed
     _currentConversation ??= Conversation.create();
@@ -112,21 +127,30 @@ class ChatProvider with ChangeNotifier {
       ChatResponse response;
       
       if (_selectedImage != null) {
-        // Send with image - include mesh_id if we have one
+        // Send with image - include mesh_id / scene_id if we have them
         response = await _apiService.sendMessageWithImage(
           message: content,
           imageFile: _selectedImage!,
           conversationId: _currentConversation!.id,
           meshId: _currentMeshId,  // Pass mesh_id for editing
+          sceneId: _currentSceneId, // Link the 3D room to this conversation
         );
         _selectedImage = null; // Clear after sending
       } else {
-        // Send text only - include mesh_id if we have one
+        // Send text only - include mesh_id / scene_id if we have them
         response = await _apiService.sendMessage(
           message: content,
           conversationId: _currentConversation!.id,
           meshId: _currentMeshId,  // Pass mesh_id for editing
+          sceneId: _currentSceneId, // Link the 3D room to this conversation
         );
+      }
+
+      // The user switched conversations while waiting: this reply belongs
+      // to the other one (it is saved on the backend), so leave state alone.
+      if (generation != _conversationGeneration) {
+        notifyListeners();
+        return;
       }
 
       // Remove loading message
@@ -144,6 +168,7 @@ class ChatProvider with ChangeNotifier {
         id: response.conversationId,
         messages: [...messagesWithoutLoading, assistantMessage],
       );
+      _conversationPersisted = true;
 
       // Update mesh info if returned from API (mesh was regenerated/updated)
       if (response.meshUrl != null) {
@@ -161,13 +186,12 @@ class ChatProvider with ChangeNotifier {
 
     } catch (e) {
       // Remove loading message on error
-      final messagesWithoutLoading = _currentConversation!.messages
-          .where((m) => !m.isLoading)
-          .toList();
-      
-      _currentConversation = _currentConversation!.copyWith(
-        messages: messagesWithoutLoading,
-      );
+      final conversation = _currentConversation;
+      if (generation == _conversationGeneration && conversation != null) {
+        _currentConversation = conversation.copyWith(
+          messages: conversation.messages.where((m) => !m.isLoading).toList(),
+        );
+      }
       
       _error = e.toString();
     }
@@ -199,7 +223,16 @@ class ChatProvider with ChangeNotifier {
 
     try {
       final data = await _apiService.getConversation(conversationId);
-      _currentConversation = Conversation.fromJson(data);
+      final conversation = Conversation.fromJson(data);
+      _currentConversation = conversation;
+      _conversationPersisted = true;
+      _conversationGeneration++;
+      // Mesh/scene state belonged to the previous conversation; restore the
+      // loaded conversation's own 3D room (if it has one).
+      _currentMeshUrl = null;
+      _currentMeshId = null;
+      _currentSceneId = conversation.sceneId;
+      _sceneJustUpdated = false;
     } catch (e) {
       _error = e.toString();
     }
@@ -216,9 +249,15 @@ class ChatProvider with ChangeNotifier {
       // Remove from local list
       _conversations.removeWhere((c) => c.id == conversationId);
       
-      // If deleted conversation was current, clear it
+      // If deleted conversation was current, clear it (and its 3D state)
       if (_currentConversation?.id == conversationId) {
         _currentConversation = null;
+        _conversationPersisted = false;
+        _conversationGeneration++;
+        _currentMeshUrl = null;
+        _currentMeshId = null;
+        _currentSceneId = null;
+        _sceneJustUpdated = false;
       }
       
       notifyListeners();

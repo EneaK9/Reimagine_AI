@@ -6,6 +6,32 @@
 
 ---
 
+## Status (Sept 2026): the room is measured, not guessed
+
+Phases 0–3 shipped earlier placed furniture from the vision model's *imagined* floor plan, with no camera, so a corner shot could not even be represented (it assumed the camera faces a "back wall"). The pipeline now measures the room from the photo and keeps the photo's camera:
+
+| Step | Where | What it does |
+|---|---|---|
+| Metric geometry | `depth_service.metric_depth` | **MoGe-2** (MIT, `Ruicheng/moge-2-vits-normal`, ~1 s on CPU) → metric depth + lens FOV. EXIF FOV wins when present. Fallback: Depth Anything V2 Metric Indoor Small + FOV self-calibration. Depth Pro was rejected (research-only weights). |
+| Camera + room | `room_geometry.analyze_room` | RANSAC floor → camera height/pitch/roll; Manhattan wall directions (corner shots work); back/side walls + ceiling from plane histograms; the room box always encloses the camera. Windows/mirrors/doors are excluded (fake depth). |
+| Semantics | `scene_builder` | Vision model lists objects (box, facing, relations) and wall features. The review pass prefers **Gemini**: its native `box_2d` boxes are far more precise than GPT's pixel boxes. |
+| Catalog shape | `semantic_service` | **TypeSafe** (optional, `TYPESAFE_API_KEY`) picks L-sofa vs straight, round vs rectangular, table vs floor lamp, rejects curtains; label rules otherwise. |
+| Furniture | `room_geometry.place_object` | Each object is measured from the depth-edge-bounded blob in its box: footprint, height, heading snapped to the walls, hidden depth from priors, flush with walls; rugs from floor rays; lamps stacked on supports. Scale correction only when standard-size cues agree. |
+| Wall features | `room_geometry.place_feature` | Rays through the feature's box hit the actual wall plane → exact wall, offset, sill and height. |
+| Scene JSON | `models/scene.py` | New `camera` (photo viewpoint), `projection` (mask of bare-shell pixels), floor texture cut top-down at its real tile size (`texture_scale_m`), `geometry` quality metrics. Old scenes load unchanged. |
+| Editor | `static/editor.html` | Opens **at the photo's viewpoint**, projects the real photo onto walls/floor/ceiling (furniture pixels masked out), "Compare" slider fades the photo over the 3D. |
+| Make realistic | `generation_service`, `mesh_alignment` | TRELLIS.2 via the fal **queue** API with 60k faces / 1K textures (was ~18 MB per object). Meshes are canonical (+Y up, front +Z); a silhouette check against the photo fixes the ones generated facing the wrong way. |
+
+**Fidelity check:** `backend/scripts/scene_fidelity.py photo.jpg [...] --out /tmp/fid` builds scenes and draws them back onto the photos through the recovered camera, printing each object's box IoU. On the three sample bedrooms: mean 0.67 / 0.52 / 0.72 (beds, nightstands, rugs 0.6–0.93). `--reuse-detection` re-checks geometry changes without new API calls.
+
+**Known limits / next steps**
+- An undetected mirror (e.g. a mirrored closet) reads as a deeper room and can push the back wall out.
+- Procedural catalog furniture stays approximate until "Make realistic" or a larger GLB catalog.
+- Evaluated, not integrated: SAM 3 masks (`fal-ai/sam-3/image`, ~$0.005/request) for sharper object pixels, and SAM 3D Objects (`fal-ai/sam-3/3d-objects`, ~$0.02) for posed per-object meshes at a fraction of TRELLIS.2's ~$0.30 — its axis/quaternion conventions are still unverified.
+- `GEOMETRY_MODEL=Ruicheng/moge-2-vitl-normal` is more accurate if the server has ~2 GB RAM to spare.
+
+---
+
 ## 1. Final Tool Decisions
 
 | Concern | Chosen tool | Why (vs. alternatives) |

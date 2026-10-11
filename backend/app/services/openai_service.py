@@ -1,6 +1,6 @@
 """
 ReimagineAI - OpenAI Service
-Handles all interactions with OpenAI APIs (GPT-4 and DALL-E 3)
+Handles interactions with OpenAI APIs (chat completions and vision)
 """
 import openai
 from openai import AsyncOpenAI
@@ -58,10 +58,13 @@ Format your response as:
     async def chat_completion(
         self,
         messages: List[Dict[str, Any]],
-        image_base64: Optional[str] = None
+        image_base64: Optional[str] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Get a chat completion from GPT-4, optionally with an image.
+        response_format is passed through to the API when given
+        (e.g. {"type": "json_object"} for JSON mode).
         """
         try:
             # Prepare messages with system prompt
@@ -96,74 +99,24 @@ Format your response as:
                         }
                         break
             
+            extra_args: Dict[str, Any] = {}
+            if response_format is not None:
+                extra_args["response_format"] = response_format
+
             response = await self.client.chat.completions.create(
                 model=self.gpt_model,
                 messages=formatted_messages,
                 max_tokens=1500,
-                temperature=0.7
+                temperature=0.7,
+                **extra_args,
             )
-            
+
             return response.choices[0].message.content
-            
+
         except Exception as e:
             print(f"Error in chat completion: {e}")
             raise
-    
-    # ============ Image Generation ============
-    
-    async def generate_room_images(
-        self,
-        prompt: str,
-        num_images: int = 4,
-        size: str = "1024x1024",
-        quality: str = "standard"
-    ) -> List[str]:
-        """
-        Generate room design images using DALL-E 3.
-        Returns list of image URLs.
-        
-        Note: DALL-E 3 only generates 1 image per request,
-        so we make multiple requests for variations.
-        """
-        image_urls = []
-        
-        # Enhanced prompt for interior design
-        enhanced_prompt = f"""Interior design photograph, professional real estate photography style:
-{prompt}
 
-Style: Photorealistic, high-end interior design magazine quality, 
-natural lighting, architectural digest style, 8K resolution, 
-shot with wide-angle lens, warm and inviting atmosphere."""
-        
-        try:
-            for i in range(num_images):
-                # Add slight variation to each prompt
-                variation_prompt = enhanced_prompt
-                if i > 0:
-                    variations = [
-                        "from a different angle",
-                        "with slightly warmer lighting",
-                        "with more emphasis on the seating area",
-                        "highlighting the decorative elements"
-                    ]
-                    variation_prompt += f"\n\nVariation: {variations[i-1]}"
-                
-                response = await self.client.images.generate(
-                    model=self.dalle_model,
-                    prompt=variation_prompt,
-                    size=size,
-                    quality=quality,
-                    n=1  # DALL-E 3 only supports n=1
-                )
-                
-                image_urls.append(response.data[0].url)
-                
-        except Exception as e:
-            print(f"Error generating images: {e}")
-            raise
-        
-        return image_urls
-    
     # ============ Extract Image Prompt from Chat ============
     
     def extract_image_prompt(self, chat_response: str) -> Optional[str]:

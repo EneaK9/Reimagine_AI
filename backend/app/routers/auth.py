@@ -5,6 +5,7 @@ Handles user authentication endpoints (login, signup, etc.)
 from fastapi import APIRouter, Depends, HTTPException, Header
 from typing import Optional
 from sqlalchemy.orm import Session
+import traceback
 
 from ..models.schemas import (
     LoginRequest,
@@ -18,8 +19,11 @@ from ..deps import get_current_user
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
+# signup/login are plain `def` so FastAPI runs them in its threadpool: password
+# hashing (PBKDF2) is deliberately slow and would otherwise block the event loop.
+
 @router.post("/signup", response_model=AuthResponse)
-async def signup(request: SignupRequest, db: Session = Depends(get_db)):
+def signup(request: SignupRequest, db: Session = Depends(get_db)):
     """Register a new user account."""
     try:
         user_data = user_service.signup(
@@ -31,12 +35,14 @@ async def signup(request: SignupRequest, db: Session = Depends(get_db)):
         return AuthResponse(**user_data)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+    except Exception:
+        print("[Auth] Signup failed:")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Registration failed")
 
 
 @router.post("/login", response_model=AuthResponse)
-async def login(request: LoginRequest, db: Session = Depends(get_db)):
+def login(request: LoginRequest, db: Session = Depends(get_db)):
     """Authenticate user and return token."""
     try:
         user_data = user_service.login(
@@ -47,8 +53,10 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
         return AuthResponse(**user_data)
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+    except Exception:
+        print("[Auth] Login failed:")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Login failed")
 
 
 @router.post("/logout")

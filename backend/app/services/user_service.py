@@ -1,11 +1,20 @@
 """
 ReimagineAI - User Service (PostgreSQL)
+
+Passwords are stored as PBKDF2-HMAC-SHA256 in a self-describing string:
+    pbkdf2_sha256$<iterations>$<salt_b64>$<hash_b64>
+Legacy rows (one round of SHA-256 over password + hex salt, hex digest in
+password_hash, salt in its own column) still verify and are re-hashed to the
+new format on the next successful login.
 """
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Dict, Optional
+import base64
+import binascii
 import hashlib
+import hmac
 import secrets
 import uuid
 
@@ -14,19 +23,59 @@ from sqlalchemy.orm import Session
 
 from ..db.models import User
 
+PBKDF2_ALGORITHM = "pbkdf2_sha256"
+PBKDF2_ITERATIONS = 600_000  # OWASP (2023) guidance for PBKDF2-HMAC-SHA256
+PBKDF2_SALT_BYTES = 16
+
 
 class UserService:
     """User authentication persisted in PostgreSQL."""
 
-    def _hash_password(self, password: str, salt: Optional[str] = None) -> tuple[str, str]:
-        if salt is None:
-            salt = secrets.token_hex(16)
-        password_hash = hashlib.sha256(f"{password}{salt}".encode()).hexdigest()
-        return password_hash, salt
+    def _hash_password(self, password: str) -> tuple[str, str]:
+        """
+        Hash a password with PBKDF2-HMAC-SHA256.
+        Returns (encoded hash for users.password_hash, salt for users.salt).
+        The salt is embedded in the encoded hash; the column copy only keeps
+        the NOT NULL salt column populated.
+        """
+        salt = secrets.token_bytes(PBKDF2_SALT_BYTES)
+        derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ITERATIONS)
+        salt_b64 = base64.b64encode(salt).decode("ascii")
+        hash_b64 = base64.b64encode(derived).decode("ascii")
+        return f"{PBKDF2_ALGORITHM}${PBKDF2_ITERATIONS}${salt_b64}${hash_b64}", salt_b64
 
-    def _verify_password(self, password: str, stored_hash: str, salt: str) -> bool:
-        computed_hash, _ = self._hash_password(password, salt)
-        return secrets.compare_digest(computed_hash, stored_hash)
+    def _verify_password(self, password: str, stored_hash: str, salt: Optional[str]) -> bool:
+        """Constant-time check against a PBKDF2 hash or a legacy salted SHA-256 hash."""
+        if not stored_hash:
+            return False
+        if stored_hash.startswith(f"{PBKDF2_ALGORITHM}$"):
+            try:
+                _, iterations, salt_b64, hash_b64 = stored_hash.split("$")
+                rounds = int(iterations)
+                salt_bytes = base64.b64decode(salt_b64, validate=True)
+                expected = base64.b64decode(hash_b64, validate=True)
+            except (ValueError, binascii.Error):
+                print("[UserService] Malformed PBKDF2 password hash")
+                return False
+            if rounds < 1 or not expected:
+                return False
+            derived = hashlib.pbkdf2_hmac(
+                "sha256", password.encode("utf-8"), salt_bytes, rounds, dklen=len(expected)
+            )
+            return hmac.compare_digest(derived, expected)
+        # Legacy: sha256(password + salt) as a hex digest
+        legacy = hashlib.sha256(f"{password}{salt or ''}".encode()).hexdigest()
+        return hmac.compare_digest(legacy.encode(), stored_hash.encode())
+
+    def _needs_rehash(self, stored_hash: str) -> bool:
+        """True for legacy hashes or PBKDF2 hashes below the current iteration count."""
+        parts = (stored_hash or "").split("$")
+        if len(parts) != 4 or parts[0] != PBKDF2_ALGORITHM:
+            return True
+        try:
+            return int(parts[1]) < PBKDF2_ITERATIONS
+        except ValueError:
+            return True
 
     def _generate_token(self) -> str:
         return secrets.token_urlsafe(32)
@@ -80,6 +129,12 @@ class UserService:
         user = db.scalar(select(User).where(User.email == email.lower().strip()))
         if not user or not self._verify_password(password, user.password_hash, user.salt):
             raise ValueError("Invalid email or password")
+
+        if self._needs_rehash(user.password_hash):
+            # Transparent upgrade (legacy SHA-256 or fewer iterations);
+            # persisted by the commit below together with the new token.
+            user.password_hash, user.salt = self._hash_password(password)
+            print(f"[UserService] Upgraded password hash for {user.username}")
 
         user.token = self._generate_token()
         user.updated_at = datetime.utcnow()

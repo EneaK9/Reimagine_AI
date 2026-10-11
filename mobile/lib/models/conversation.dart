@@ -8,12 +8,16 @@ class Conversation {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  /// Editable 3D scene linked to this conversation (if any)
+  final String? sceneId;
+
   Conversation({
     required this.id,
     required this.title,
     this.messages = const [],
     DateTime? createdAt,
     DateTime? updatedAt,
+    this.sceneId,
   })  : createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now();
 
@@ -46,6 +50,7 @@ class Conversation {
       updatedAt: json['updated_at'] != null
           ? DateTime.parse(json['updated_at'])
           : DateTime.now(),
+      sceneId: json['scene_id'] as String?,
     );
   }
 
@@ -56,6 +61,7 @@ class Conversation {
       'messages': messages.map((m) => m.toJson()).toList(),
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
+      'scene_id': sceneId,
     };
   }
 
@@ -65,6 +71,7 @@ class Conversation {
     List<Message>? messages,
     DateTime? createdAt,
     DateTime? updatedAt,
+    String? sceneId,
   }) {
     return Conversation(
       id: id ?? this.id,
@@ -72,6 +79,7 @@ class Conversation {
       messages: messages ?? this.messages,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      sceneId: sceneId ?? this.sceneId,
     );
   }
 

@@ -28,6 +28,7 @@ from ..models.scene import (
 )
 from .catalog_service import catalog_service
 from .openai_service import openai_service
+from .semantic_service import semantic_service
 
 settings = get_settings()
 
@@ -233,7 +234,11 @@ class SceneService:
                 ("ceiling_color", "ceiling_material"),
             ):
                 if mat_key in value:
-                    room[mat_name]["color"] = value[mat_key]
+                    material = room.setdefault(mat_name, {})
+                    material["color"] = value[mat_key]
+                    # A new color replaces the photo's texture, like recolor
+                    material["texture_url"] = None
+                    material["photo_projection"] = False
             return
 
         if kind == "add":
@@ -253,6 +258,7 @@ class SceneService:
                 if feature["id"] == op.target:
                     if "color" in value:
                         feature["color"] = value["color"]
+                        feature["photo_projection"] = False  # show the new color, not the photo
                     return
 
         # Shell material edits addressed as wall/floor/ceiling
@@ -264,7 +270,9 @@ class SceneService:
             if "color" in value:
                 material["color"] = value["color"]
                 # Explicit recolor means "flat color" — drop the photo texture
+                # and stop projecting the photo onto this surface
                 material["texture_url"] = None
+                material["photo_projection"] = False
             if "texture" in value:
                 material["texture"] = value["texture"]
             return
@@ -310,18 +318,25 @@ class SceneService:
         self,
         db: Session,
         scene_id: str,
-        asset_urls: Dict[str, str],
+        asset_urls: Dict[str, Any],
         user_id: Optional[str] = None,
     ) -> Optional["SceneResponse"]:
-        """Swap objects' assets to generated GLB URLs (one version bump)."""
+        """
+        Swap objects' assets to generated GLBs (one version bump). Values are
+        a URL, or a full asset dict ({"type": "url", "ref", "canonical", ...}).
+        """
         row = self._get_row(db, scene_id, user_id)
         if not row:
             return None
+        # Generation takes minutes: reload so edits saved meanwhile survive
+        db.refresh(row)
         data = copy.deepcopy(row.data)
         for obj in data.get("objects", []):
-            url = asset_urls.get(obj["id"])
-            if url:
-                obj["asset"] = {"type": "url", "ref": url}
+            asset = asset_urls.get(obj["id"])
+            if isinstance(asset, str):
+                obj["asset"] = {"type": "url", "ref": asset}
+            elif isinstance(asset, dict) and asset.get("ref"):
+                obj["asset"] = {"type": "url", **asset}
         SceneData.model_validate(data)
         self._snapshot(db, row)
         row.data = data
@@ -375,13 +390,87 @@ class SceneService:
                                        value={"color": hex_match.group(0).upper()}))
         return ops
 
-    async def parse_nl_edit(self, data: dict, instruction: str) -> List[SceneOp]:
-        """Turn 'make the sofa navy and move it to the back wall' into SceneOps."""
-        # Deterministic path for pure shell recolors
-        rule_ops = self._rule_based_shell_ops(instruction)
-        if rule_ops:
-            print(f"[SceneService] Rule-based shell edit: {len(rule_ops)} op(s)")
-            return rule_ops
+    @staticmethod
+    def _color_name(hex_color: Optional[str]) -> str:
+        """Nearest named color (typed judgments read words, not hex codes)."""
+        if not hex_color or not isinstance(hex_color, str):
+            return ""
+        try:
+            h = hex_color.lstrip("#")
+            rgb = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+        except (ValueError, IndexError):
+            return ""
+
+        def dist(name: str) -> int:
+            c = COLOR_MAP[name].lstrip("#")
+            return sum((int(c[i * 2:i * 2 + 2], 16) - rgb[i]) ** 2 for i in range(3))
+
+        return min(COLOR_MAP, key=dist)
+
+    @staticmethod
+    def _where(obj: dict, room: dict) -> str:
+        """Plain-words position of an object in the room (for target grounding)."""
+        try:
+            x, _, z = obj["transform"]["pos"]
+            w, d = float(room.get("width_m") or 4), float(room.get("depth_m") or 4)
+        except (KeyError, TypeError, ValueError):
+            return ""
+        side = "left side" if x < -w / 6 else ("right side" if x > w / 6 else "middle")
+        depth = "near the back wall" if z < -d / 6 else ("near the front" if z > d / 6 else "center")
+        on_top = " (on top of other furniture)" if obj["transform"]["pos"][1] > 0.05 else ""
+        return f"{side}, {depth}{on_top}"
+
+    def _ops_from_judgment(self, judgment: Dict[str, Any], data: dict) -> List[SceneOp]:
+        action = judgment["action"]
+        if action.startswith("recolor"):
+            color = COLOR_MAP[judgment["color"]]
+            target = {"recolor_walls": "wall", "recolor_floor": "floor",
+                      "recolor_ceiling": "ceiling"}.get(action, judgment.get("target"))
+            return [SceneOp(op="recolor", target=target, value={"color": color})]
+        if action == "remove_object":
+            return [SceneOp(op="remove", target=judgment["target"], value={})]
+        if action == "rotate_object":
+            obj = self._find_object(data, judgment["target"])
+            if obj is None:
+                return []
+            current = float(obj["transform"].get("rot_y_deg") or 0.0)
+            return [SceneOp(op="rotate", target=obj["id"],
+                            value={"rot_y_deg": (current + judgment["rotate_deg"]) % 360.0})]
+        return []
+
+    async def parse_nl_edit(self, data: dict, instruction: str, fast_paths: bool = True) -> List[SceneOp]:
+        """
+        Turn 'make the sofa navy and move it to the back wall' into SceneOps.
+        fast_paths=False skips the keyword and typed-judgment shortcuts: they
+        read a user's direct request, not a description to interpret (e.g.
+        an assistant proposal that mentions the current colors too).
+        """
+        room = data.get("room", {})
+        if fast_paths:
+            # Deterministic path for pure shell recolors
+            rule_ops = self._rule_based_shell_ops(instruction)
+            if rule_ops:
+                print(f"[SceneService] Rule-based shell edit: {len(rule_ops)} op(s)")
+                return rule_ops
+
+            # Simple single edits as typed judgments grounded in the scene's
+            # real object ids (~100 ms); anything else goes to GPT below.
+            described = [
+                {
+                    "id": o["id"],
+                    "category": o["category"],
+                    "label": o.get("label", ""),
+                    "where": self._where(o, room),
+                    "color_name": self._color_name((o.get("material_override") or {}).get("color")),
+                }
+                for o in data.get("objects", [])
+            ]
+            judgment = await semantic_service.parse_scene_edit(instruction, described, list(COLOR_MAP))
+            if judgment:
+                ops = self._ops_from_judgment(judgment, data)
+                if ops:
+                    print(f"[SceneService] TypeSafe edit: {judgment}")
+                    return ops
         objects_desc = [
             {
                 "id": o["id"],
@@ -450,12 +539,16 @@ Examples:
         scene_id: str,
         instruction: str,
         user_id: Optional[str] = None,
+        fast_paths: bool = True,
     ) -> tuple[Optional[SceneResponse], List[SceneOp], str]:
         row = self._get_row(db, scene_id, user_id)
         if not row:
             return None, [], "Scene not found"
 
-        ops = await self.parse_nl_edit(row.data, instruction)
+        ops = await self.parse_nl_edit(row.data, instruction, fast_paths=fast_paths)
+        # The parse can take seconds; apply to the latest version so edits
+        # saved by the editor meanwhile aren't overwritten.
+        db.refresh(row)
         if not ops:
             return self._to_response(row), [], (
                 "I couldn't map that request to a 3D edit. Try something like "

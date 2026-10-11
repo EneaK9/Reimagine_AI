@@ -5,13 +5,14 @@ Structured, editable 3D room scenes:
 photo -> scene generation, catalog, edit ops, versions, natural-language edits.
 """
 import base64
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from ..db.session import get_db
-from ..deps import get_current_user
+from ..deps import check_base64_size, get_current_user, read_upload_limited
 from ..models.scene import (
     SceneGenerationRequest,
     SceneNLEditRequest,
@@ -30,14 +31,20 @@ router = APIRouter(prefix="/scenes", tags=["3D Scenes"])
 
 @router.get("/assets/{filename}")
 async def get_generated_asset(filename: str):
-    """Serve a generated asset: furniture GLB or photo-sampled texture."""
+    """Serve a generated asset: furniture GLB, photo-sampled texture or projection mask."""
     from fastapi.responses import FileResponse
 
     path = generation_service.asset_path(filename)
     if not path:
         raise HTTPException(status_code=404, detail="Asset not found")
-    media_type = "image/jpeg" if filename.endswith(".jpg") else "model/gltf-binary"
-    return FileResponse(path, media_type=media_type)
+    media_type = {".jpg": "image/jpeg", ".png": "image/png"}.get(
+        os.path.splitext(filename)[1].lower(), "model/gltf-binary"
+    )
+    # Names are unique and never rewritten: let phones cache them for good
+    return FileResponse(
+        path, media_type=media_type,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 @router.get("/catalog")
@@ -53,9 +60,11 @@ async def generate_scene(
     current_user: dict = Depends(get_current_user),
 ):
     """
-    Build an editable 3D scene from a room photo:
-    furniture detection + depth-based placement + catalog asset matching.
+    Build an editable 3D scene from a room photo: the room is measured from
+    metric depth (camera, walls, furniture positions), the vision model names
+    and relates the furniture, and the photo's camera is kept for the editor.
     """
+    check_base64_size(request.image_base64)
     try:
         data, resized_image = await scene_builder.build_scene_from_image(request.image_base64)
     except RuntimeError as e:
@@ -96,7 +105,7 @@ async def generate_scene_from_upload(
     current_user: dict = Depends(get_current_user),
 ):
     """Multipart variant of /generate."""
-    image_content = await image.read()
+    image_content = await read_upload_limited(image)
     request = SceneGenerationRequest(
         image_base64=base64.b64encode(image_content).decode("utf-8"),
         conversation_id=conversation_id,
@@ -112,6 +121,23 @@ async def list_scenes(
 ):
     """List the current user's scenes."""
     return {"scenes": scene_service.list_scenes(db, current_user["id"])}
+
+
+@router.get("/{scene_id}/photo")
+async def get_scene_photo(
+    scene_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """The scene's source photo (the editor overlays/projects it)."""
+    from fastapi.responses import FileResponse
+
+    if not scene_service.get_scene(db, scene_id, current_user["id"]):
+        raise HTTPException(status_code=404, detail="Scene not found")
+    path = os.path.join(generation_service.scene_images_dir, f"{os.path.basename(scene_id)}.jpg")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Photo not available for this scene")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.get("/{scene_id}", response_model=SceneResponse)
@@ -194,10 +220,14 @@ async def enhance_scene(
     """
     Replace procedural stand-in furniture with AI-generated 3D meshes:
     each detected object is cropped from the original photo and run through
-    an image-to-3D model (fal.ai TRELLIS). Objects that fail keep their
-    procedural model. Requires FAL_API_KEY.
+    an image-to-3D model (fal.ai TRELLIS.2). The mesh keeps the object's
+    measured position, heading and size; its silhouette is checked against
+    the photo to catch meshes generated facing the wrong way. Objects that
+    fail keep their procedural model. Requires FAL_API_KEY.
     """
     import asyncio
+
+    from ..services.mesh_alignment import choose_yaw_offset
 
     if not generation_service.enabled:
         raise HTTPException(
@@ -211,6 +241,9 @@ async def enhance_scene(
     scene = scene_service.get_scene(db, scene_id, current_user["id"])
     if not scene:
         raise HTTPException(status_code=404, detail="Scene not found")
+    # Generation takes minutes: don't hold a pooled connection idle in a
+    # transaction meanwhile (update_asset_refs reloads the row at the end)
+    db.rollback()
 
     photo = generation_service.load_scene_image(scene_id)
     if photo is None:
@@ -234,6 +267,7 @@ async def enhance_scene(
 
     # 2 concurrent generations: higher parallelism trips fal.ai rate limits (403)
     semaphore = asyncio.Semaphore(2)
+    camera = scene.data.camera.model_dump() if scene.data.camera else None
 
     async def generate(obj):
         x0, y0, x1, y1 = obj.source["bbox"]
@@ -244,16 +278,34 @@ async def enhance_scene(
         x0, y0, x1, y1 = x0 * sx, y0 * sy, x1 * sx, y1 * sy
         # Pad the crop a little for context
         pad_x, pad_y = int((x1 - x0) * 0.08), int((y1 - y0) * 0.08)
-        crop = photo.crop((
+        crop_box = (
             max(0, int(x0) - pad_x), max(0, int(y0) - pad_y),
             min(photo.width, int(x1) + pad_x), min(photo.height, int(y1) + pad_y),
-        ))
+        )
+        crop = photo.crop(crop_box)
         async with semaphore:
-            url = await generation_service.image_to_glb(crop, label=obj.label)
-        return obj.id, url
+            mesh = await generation_service.image_to_glb(crop, label=obj.label)
+        if mesh is None:
+            return obj.id, None
+        # Generators return the model upright, front on +Z (the scene's own
+        # convention) — verify against the photo and fix the rare flips.
+        try:
+            offset, scores = await asyncio.to_thread(
+                choose_yaw_offset, mesh.path, obj.model_dump(), camera, photo.size, crop_box, mesh.alpha,
+            )
+        except Exception as e:  # never lose a paid-for mesh over the check
+            print(f"[Scenes] Orientation check failed for '{obj.label}': {e!r}")
+            offset, scores = 0.0, {}
+        if scores:
+            print(f"[Scenes] '{obj.label}' silhouette IoU by turn: "
+                  f"{ {int(k): round(v, 2) for k, v in scores.items()} } -> {int(offset)}")
+        return obj.id, {"ref": mesh.url, "canonical": True, "yaw_offset_deg": offset}
 
-    results = await asyncio.gather(*(generate(o) for o in candidates))
-    asset_urls = {obj_id: url for obj_id, url in results if url}
+    results = await asyncio.gather(*(generate(o) for o in candidates), return_exceptions=True)
+    for r in results:
+        if isinstance(r, BaseException):
+            print(f"[Scenes] Enhance step failed: {r!r}")
+    asset_urls = {r[0]: r[1] for r in results if not isinstance(r, BaseException) and r[1]}
 
     if not asset_urls:
         raise HTTPException(

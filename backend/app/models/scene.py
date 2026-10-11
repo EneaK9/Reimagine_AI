@@ -18,6 +18,10 @@ class MaterialDef(BaseModel):
     color: str = "#CCCCCC"  # hex color
     texture: Optional[str] = None  # texture preset name (e.g. "oak_01"), optional
     texture_url: Optional[str] = None  # real texture sampled from the user's photo
+    texture_scale_m: Optional[float] = None  # real-world size of one texture tile
+    # Shell surfaces show the real photo where the camera saw them; an
+    # explicit recolor turns that off for the surface.
+    photo_projection: bool = True
     roughness: float = 0.9
     metalness: float = 0.0
 
@@ -40,6 +44,7 @@ class WallFeature(BaseModel):
     height_m: float = 1.4
     bottom_m: float = 0.8
     color: str = "#FFFFFF"
+    photo_projection: bool = True  # show the real feature from the photo until recolored
 
 
 class RoomShell(BaseModel):
@@ -64,10 +69,16 @@ class AssetRef(BaseModel):
     What 3D asset represents this object.
     - type "catalog": `ref` is a catalog entry id; the editor builds it procedurally
       (or loads its GLB when the catalog entry has one).
-    - type "url": `ref` is a GLB URL (future: generated per-object meshes).
+    - type "url": `ref` is a GLB URL (AI-generated per-object mesh).
+    canonical: the GLB is upright (+Y) with its front on +Z, so the editor
+      fits it per axis to dimensions_m instead of guessing its orientation.
+    yaw_offset_deg: extra turn of the mesh inside the object (a generator
+      that built the model facing backwards), keeping the object's own yaw.
     """
     type: str = "catalog"
     ref: str
+    canonical: bool = False
+    yaw_offset_deg: float = 0.0
 
 
 class SceneObject(BaseModel):
@@ -83,12 +94,38 @@ class SceneObject(BaseModel):
     source: Optional[Dict[str, Any]] = None  # detection provenance (bbox, confidence)
 
 
+class SceneCamera(BaseModel):
+    """
+    The camera that took the photo, recovered from its geometry, in room
+    coordinates. The editor opens at this viewpoint so the 3D room lines up
+    with the photo (three.js convention: the camera looks down its local -Z).
+    """
+    position: List[float]
+    quaternion: List[float]            # [x, y, z, w]
+    target: List[float]                # orbit pivot along the view direction
+    fov_deg: float                     # vertical field of view of the photo
+    aspect: float                      # photo width / height
+    fov_source: str = "default"        # exif | manhattan | default
+
+
+class PhotoProjection(BaseModel):
+    """Photo-to-shell projection: real wall/floor pixels seen from the camera."""
+    mask_url: str                      # where the photo shows bare floor/walls/ceiling
+    width: int
+    height: int
+
+
 class SceneData(BaseModel):
     """The versioned JSON document stored in Postgres."""
     room_type: str = "living room"
     style: Optional[str] = None
     room: RoomShell = Field(default_factory=RoomShell)
     objects: List[SceneObject] = Field(default_factory=list)
+    camera: Optional[SceneCamera] = None
+    projection: Optional[PhotoProjection] = None
+    # How the layout was obtained ("measured" from depth, or "estimated"
+    # from the vision model alone) plus reconstruction quality metrics.
+    geometry: Optional[Dict[str, Any]] = None
 
 
 class SceneOp(BaseModel):
